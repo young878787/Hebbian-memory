@@ -8,3 +8,4 @@ __pycache__/
 results/*.json
 !results/.gitkeep
 .agents/
+sample/
