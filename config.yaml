@@ -1,0 +1,17 @@
+retrieval:
+  candidate_limit: 20
+  seed_top_k: 3
+  final_top_k: 5
+  semantic_top_k: 3
+  similarity_threshold: 0.72
+  activation_alpha: 0.20
+  spread_depth: 1
+  max_neighbors_per_seed: 5
+  tie_score_tolerance: 1.0e-6
+learning:
+  co_retrieval_increment: 0.02
+  max_edge_weight: 1.0
+status_adjustments:
+  historical: {active: 0.00, superseded: 0.00, uncertain: -0.15, archived: -0.25}
+  current: {active: 0.15, superseded: -0.35, uncertain: -0.20, archived: -0.40}
+  general: {active: 0.05, superseded: -0.15, uncertain: -0.15, archived: -0.30}

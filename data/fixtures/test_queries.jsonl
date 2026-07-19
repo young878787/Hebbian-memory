@@ -1,0 +1,10 @@
+{"query_id":"Q_DIRECT_01","query":"她喜歡什麼？","scope":"general","must_include":["M9"],"nice_to_have":["M11"],"must_not_primary":[],"expect_answerable":true,"category":"direct"}
+{"query_id":"Q_DIRECT_02","query":"她不喜歡哪種環境？","scope":"general","must_include":["M10"],"nice_to_have":[],"must_not_primary":[],"expect_answerable":true,"category":"direct"}
+{"query_id":"Q_GPU_HISTORY_01","query":"我之前是不是說過想買顯卡？","scope":"historical","must_include":["M1","M3"],"nice_to_have":["M4"],"must_not_primary":[],"expect_answerable":true,"category":"association"}
+{"query_id":"Q_GPU_ASSOC_02","query":"為什麼現在提到 CMP 170HX，可能會聯想到 RTX 3090？","scope":"historical","must_include":["M1","M4"],"nice_to_have":["M3"],"must_not_primary":[],"expect_answerable":true,"category":"association"}
+{"query_id":"Q_GPU_ASSOC_03","query":"我最近又提到大顯存，角色應該想到哪些過去內容？","scope":"general","must_include":["M5","M7"],"nice_to_have":["M4"],"must_not_primary":[],"expect_answerable":true,"category":"association"}
+{"query_id":"Q_GPU_CURRENT_01","query":"我現在還打算買 RTX 3090 嗎？","scope":"current","must_include":["M3"],"nice_to_have":["M4"],"must_not_primary":["M1"],"expect_answerable":true,"category":"current"}
+{"query_id":"Q_GPU_CURRENT_02","query":"我最後有沒有買那張顯卡？","scope":"current","must_include":["M3"],"nice_to_have":["M1"],"must_not_primary":["M1"],"expect_answerable":true,"category":"current"}
+{"query_id":"Q_GPU_CURRENT_03","query":"目前優先研究的顯卡方向是什麼？","scope":"current","must_include":["M4"],"nice_to_have":["M5","M7"],"must_not_primary":["M1"],"expect_answerable":true,"category":"current"}
+{"query_id":"Q_NO_ANSWER_01","query":"我有沒有買過 A100？","scope":"current","must_include":[],"nice_to_have":[],"must_not_primary":["M31","M33"],"expect_answerable":false,"category":"no_answer"}
+{"query_id":"Q_NO_ANSWER_02","query":"我曾經說過最喜歡 AMD 顯卡嗎？","scope":"historical","must_include":[],"nice_to_have":[],"must_not_primary":["M32","M34"],"expect_answerable":false,"category":"no_answer"}
