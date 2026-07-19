@@ -9,7 +9,11 @@ from .settings import EXPECTED_DATABASE, Settings
 
 
 def create_db_engine(settings: Settings) -> Engine:
-    return create_engine(settings.database_url(), pool_pre_ping=True)
+    return create_engine(
+        settings.database_url(),
+        pool_pre_ping=True,
+        connect_args={"connect_timeout": 10},
+    )
 
 
 def verify_database_target(engine: Engine, settings: Settings) -> None:

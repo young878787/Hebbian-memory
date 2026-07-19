@@ -40,7 +40,7 @@ class EmbeddingClient:
         self.settings = settings
         self.client = OpenAI(
             base_url=settings.embedding_base_url,
-            api_key=settings.embedding_api_key.get_secret_value(),
+            api_key=settings.embedding_api_key.get_secret_value() or "local",
             timeout=30.0,
             max_retries=1,
         )
