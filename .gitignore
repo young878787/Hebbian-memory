@@ -9,3 +9,4 @@ results/*.json
 !results/.gitkeep
 .agents/
 sample/
+results/

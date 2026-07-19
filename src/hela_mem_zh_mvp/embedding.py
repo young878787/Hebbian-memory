@@ -19,7 +19,9 @@ class EmbeddingError(RuntimeError):
 
 def normalize_embedding(values: list[float]) -> list[float]:
     if len(values) != EMBEDDING_DIMENSION:
-        raise EmbeddingError(f"embedding dimension must be {EMBEDDING_DIMENSION}, got {len(values)}")
+        raise EmbeddingError(
+            f"embedding dimension must be {EMBEDDING_DIMENSION}, got {len(values)}"
+        )
     if not all(math.isfinite(value) for value in values):
         raise EmbeddingError("embedding contains non-finite values")
     norm = math.sqrt(sum(value * value for value in values))
@@ -49,7 +51,9 @@ class EmbeddingClient:
     def served_model_id(self) -> str:
         if self._served_model_id is None:
             models = self.client.models.list().data
-            matching = next((item.id for item in models if item.id == self.settings.embedding_model), None)
+            matching = next(
+                (item.id for item in models if item.id == self.settings.embedding_model), None
+            )
             if not matching:
                 available = ", ".join(sorted(item.id for item in models))
                 raise EmbeddingError(

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from .edges import edge_weight, upsert_edge
 from .embedding import EmbeddingClient
-from .models import Memory
+from .models import Memory, MemoryNamespace
 from .schemas import FixtureEdge, FixtureMemory, FixtureQuery
 
 
@@ -27,7 +27,9 @@ class FixtureBundle:
     aliases: dict[str, list[str]]
 
 
-def _load_jsonl(path: Path, model: type[FixtureMemory] | type[FixtureEdge] | type[FixtureQuery]) -> list:
+def _load_jsonl(
+    path: Path, model: type[FixtureMemory] | type[FixtureEdge] | type[FixtureQuery]
+) -> list:
     values: list = []
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
@@ -65,17 +67,42 @@ def load_fixture_bundle(directory: str | Path) -> FixtureBundle:
 
 
 def seed_fixtures(
-    session: Session, bundle: FixtureBundle, client: EmbeddingClient, *, replace_fixtures: bool = False
+    session: Session,
+    bundle: FixtureBundle,
+    client: EmbeddingClient,
+    *,
+    namespace_key: str = "legacy-mvp-v0.4",
+    replace_fixtures: bool = False,
 ) -> int:
-    existing = {memory.external_id: memory for memory in session.scalars(select(Memory)).all()}
+    namespace = session.scalar(
+        select(MemoryNamespace).where(MemoryNamespace.namespace_key == namespace_key)
+    )
+    if namespace is None:
+        namespace = MemoryNamespace(namespace_key=namespace_key, display_name=namespace_key)
+        session.add(namespace)
+        session.flush()
+    existing = {
+        memory.external_id: memory
+        for memory in session.scalars(
+            select(Memory).where(Memory.namespace_id == namespace.id)
+        ).all()
+    }
     collisions = set(existing) & {item.external_id for item in bundle.memories}
     if collisions and not replace_fixtures:
-        raise FixtureError("fixture external_id already exists; pass --replace-fixtures to update fixture records")
+        raise FixtureError(
+            "fixture external_id already exists; pass --replace-fixtures to update fixture records"
+        )
     records: dict[str, Memory] = {}
     for item in bundle.memories:
         record = existing.get(item.external_id)
         if record is None:
-            record = Memory(external_id=item.external_id, embedding=client.embed(item.content))
+            record = Memory(
+                namespace_id=namespace.id,
+                external_id=item.external_id,
+                canonical_key=item.external_id,
+                extraction_schema_version="fixture-v0.4",
+                embedding=client.embed(item.content),
+            )
             session.add(record)
         else:
             record.embedding = client.embed(item.content)
@@ -93,7 +120,12 @@ def seed_fixtures(
     session.flush()
     for edge in bundle.edges:
         upsert_edge(
-            session, records[edge.source_external_id].id, records[edge.target_external_id].id,
-            edge.edge_type, edge_weight(edge.edge_type, edge.weight), edge.metadata,
+            session,
+            namespace.id,
+            records[edge.source_external_id].id,
+            records[edge.target_external_id].id,
+            edge.edge_type,
+            edge_weight(edge.edge_type, edge.weight),
+            edge.metadata,
         )
     return len(records)

@@ -1,0 +1,12 @@
+{"message_id":"msg-001","session_id":"fixture-gpu-01","role":"user","content":"我曾想買 RTX 3090，但擔心價格和風險。","occurred_at":"2026-01-10T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-002","session_id":"fixture-gpu-01","role":"user","content":"最後我沒有買 RTX 3090，先考慮借用或租借顯卡測試。","occurred_at":"2026-01-15T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-003","session_id":"fixture-gpu-02","role":"user","content":"最近開始研究 CMP 170HX，還不確定改裝風險。","occurred_at":"2026-02-01T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-004","session_id":"fixture-gpu-02","role":"user","content":"我需要大顯存來測試本機語言模型，也想知道 CMP 170HX 能否解鎖更大顯存。","occurred_at":"2026-02-04T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-005","session_id":"fixture-character-01","role":"assistant","content":"角色喜歡安靜、光線柔和的房間，不喜歡吵雜和擁擠的環境。","occurred_at":"2025-12-01T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-006","session_id":"fixture-character-01","role":"assistant","content":"角色喜歡無糖熱茶，閱讀時習慣播放輕音樂，偏好使用繁體中文溝通。","occurred_at":"2025-12-02T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-007","session_id":"fixture-character-01","role":"assistant","content":"角色喜歡把複雜問題拆成小步驟，不確定時會先說明假設。","occurred_at":"2025-12-03T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-008","session_id":"fixture-other-01","role":"user","content":"我正在整理 RAG 評估資料集，希望 benchmark 結果可重現。","occurred_at":"2026-03-01T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-009","session_id":"fixture-other-01","role":"user","content":"我會先確認資料庫 migration 的目標，也在比較不同 embedding 模型的中文效果。","occurred_at":"2026-03-04T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-010","session_id":"fixture-other-01","role":"user","content":"我偏好先做小型概念驗證，並以實際測試驗證演算法假設。","occurred_at":"2026-03-06T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-011","session_id":"fixture-other-01","role":"user","content":"我希望長時間工作有簡短進度提示，敏感金鑰只放在本機環境檔。","occurred_at":"2026-03-08T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-012","session_id":"fixture-other-01","role":"user","content":"我正在研究記憶系統的可追蹤性。","occurred_at":"2026-03-11T12:00:00+08:00","metadata":{}}

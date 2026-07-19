@@ -8,10 +8,15 @@ from hela_mem_zh_mvp.schemas import RetrievalMode
 
 def _item(external_id: str, score: float, hebbian: float = 0.0) -> RankedMemory:
     memory = SimpleNamespace(
-        id=uuid4(), external_id=external_id, occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
-        created_at=datetime(2026, 1, 1, tzinfo=UTC), status="active",
+        id=uuid4(),
+        external_id=external_id,
+        occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        status="active",
     )
-    return RankedMemory(memory=memory, semantic_score=score, final_score=score + hebbian, hebbian_score=hebbian)
+    return RankedMemory(
+        memory=memory, semantic_score=score, final_score=score + hebbian, hebbian_score=hebbian
+    )
 
 
 def test_hebbian_keeps_seeds_and_only_adds_positive_bonus() -> None:
