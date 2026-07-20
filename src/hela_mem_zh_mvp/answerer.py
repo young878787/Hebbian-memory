@@ -27,7 +27,9 @@ def answer_query(provider: StructuredProvider, query: str, result: RetrievalResu
     ]
     prompt = (
         "根據提供的 selected memories 回答問題。只回傳 memory-answer-v1 JSON。"
-        "不得使用未提供的事實；answerable=false 時說明無法由現有記憶確定。\n"
+        "不得使用未提供的事實；answerable=false 時說明無法由現有記憶確定。"
+        "answerable=true 時 citations 必須至少包含一個 selected memory 的 external_id；"
+        "answerable=false 時 citations 必須是空陣列。\n"
         f"query={query}\nselected memories={json.dumps(evidence, ensure_ascii=False)}"
     )
     answer = provider.generate_structured(prompt, AnswerResult)

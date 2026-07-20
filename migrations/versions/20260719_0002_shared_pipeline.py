@@ -29,9 +29,12 @@ def upgrade() -> None:
         sa.Column("metadata", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
     )
     legacy_id = uuid.uuid4()
-    op.bulk_insert(
-        sa.table("memory_namespaces", sa.column("id", postgresql.UUID(as_uuid=True)), sa.column("namespace_key", sa.String()), sa.column("display_name", sa.String()), sa.column("metadata", postgresql.JSONB())),
-        [{"id": legacy_id, "namespace_key": LEGACY_NAMESPACE_KEY, "display_name": "v0.4 migrated records", "metadata": {"migration": revision}}],
+    # Use literal SQL instead of bulk_insert so `alembic upgrade --sql` can
+    # render the JSONB seed row as well as an online PostgreSQL migration.
+    op.execute(
+        "INSERT INTO memory_namespaces (id, namespace_key, display_name, metadata) "
+        f"VALUES ('{legacy_id}', '{LEGACY_NAMESPACE_KEY}', 'v0.4 migrated records', "
+        f"'{{\"migration\": \"{revision}\"}}'::jsonb)"
     )
     op.add_column("memories", sa.Column("namespace_id", postgresql.UUID(as_uuid=True), nullable=True))
     op.add_column("memories", sa.Column("canonical_key", sa.String(128), nullable=True))

@@ -20,6 +20,8 @@ def extract_messages(
         "將以下對話轉為 atomic memories。只回傳 memory-extraction-v1 JSON。"
         "不得編造證據。每個 entity.evidence 與 memory.evidence 必須從對應來源 content 直接複製一段連續、逐字完全相同的原文；"
         "不可改寫、翻譯、摘要、補上標點或合併不同句子。若無法提供這種逐字證據，請略過該 entity 或 memory。"
+        "memory 可選填 attribute_key（可更新的狀態欄位）與 primary_entity_candidate_id；不確定時省略 attribute_key，"
+        "不要猜測人物別名或跨語言同一性。"
         "不得輸出資料庫 ID、namespace、SQL 或 edge weight。\n"
         f"來源訊息：{json.dumps(payload, ensure_ascii=False)}"
     )

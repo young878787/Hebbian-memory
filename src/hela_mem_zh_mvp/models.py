@@ -101,6 +101,36 @@ class Entity(Base):
     )
 
 
+class EntityAlias(Base):
+    __tablename__ = "entity_aliases"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["namespace_id", "entity_id"],
+            ["entities.namespace_id", "entities.id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "namespace_id", "entity_type", "alias_normalized", name="uq_entity_aliases_scope_key"
+        ),
+        CheckConstraint("confidence BETWEEN 0.0 AND 1.0", name="ck_entity_aliases_confidence"),
+        CheckConstraint(
+            "status IN ('active','pending','rejected')", name="ck_entity_aliases_status"
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    alias_raw: Mapped[str] = mapped_column(String(255), nullable=False)
+    alias_normalized: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_ref: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(REAL, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    normalizer_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Memory(Base):
     __tablename__ = "memories"
     __table_args__ = (
@@ -116,6 +146,13 @@ class Memory(Base):
         CheckConstraint("importance BETWEEN 0.0 AND 1.0", name="ck_memories_importance"),
         CheckConstraint("confidence BETWEEN 0.0 AND 1.0", name="ck_memories_confidence"),
         Index("ix_memories_namespace_status_occurred_at", "namespace_id", "status", "occurred_at"),
+        Index(
+            "ix_memories_resolution_scope",
+            "namespace_id",
+            "memory_type",
+            "topic_key",
+            "status",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     namespace_id: Mapped[uuid.UUID] = mapped_column(
@@ -127,6 +164,11 @@ class Memory(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     memory_type: Mapped[str] = mapped_column(String(32), nullable=False)
     topic: Mapped[str | None] = mapped_column(String(100))
+    topic_raw: Mapped[str | None] = mapped_column(String(100))
+    topic_key: Mapped[str | None] = mapped_column(String(100))
+    topic_version: Mapped[str | None] = mapped_column(String(32))
+    attribute_key: Mapped[str | None] = mapped_column(String(100))
+    state_key: Mapped[str | None] = mapped_column(String(64))
     occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
@@ -159,6 +201,59 @@ class MemoryEntity(Base):
     entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     mention_role: Mapped[str | None] = mapped_column(String(32))
     confidence: Mapped[float] = mapped_column(REAL, nullable=False)
+
+
+class MemoryCandidate(Base):
+    __tablename__ = "memory_candidates"
+    __table_args__ = (
+        UniqueConstraint("namespace_id", "candidate_key", name="uq_memory_candidates_scope_key"),
+        CheckConstraint(
+            "status IN ('pending','resolving','resolved','deferred','failed')",
+            name="ck_memory_candidates_status",
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memory_namespaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    ingestion_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ingestion_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    candidate_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    extraction_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    normalized_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(VECTOR(2560), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class MemoryResolutionDecision(Base):
+    __tablename__ = "memory_resolution_decisions"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memory_namespaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memory_candidates.id", ondelete="RESTRICT"), nullable=False
+    )
+    resolver_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    resolver_model: Mapped[str | None] = mapped_column(String(255))
+    resolver_schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    candidate_snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_memory_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    confidence: Mapped[float] = mapped_column(REAL, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_quotes: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    validation_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    before_state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    after_state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class MemoryEdge(Base):

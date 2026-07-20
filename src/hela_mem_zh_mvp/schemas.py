@@ -59,6 +59,14 @@ class ResolutionAction(StrEnum):
     SUPERSEDE = "SUPERSEDE"
     CONTRADICT = "CONTRADICT"
     IGNORE = "IGNORE"
+    DEFER = "DEFER"
+
+
+class EffectiveOrder(StrEnum):
+    CANDIDATE_AFTER_TARGET = "candidate_after_target"
+    CANDIDATE_BEFORE_TARGET = "candidate_before_target"
+    SAME_TIME = "same_time"
+    UNKNOWN = "unknown"
 
 
 class SourceMessage(BaseModel):
@@ -97,6 +105,8 @@ class ExtractedMemory(BaseModel):
     memory_type: MemoryType
     entity_candidate_ids: list[str] = Field(default_factory=list)
     concepts: list[str] = Field(default_factory=list)
+    attribute_key: str | None = Field(default=None, min_length=1, max_length=100)
+    primary_entity_candidate_id: str | None = None
     occurred_at: datetime
     importance: float = Field(ge=0, le=1)
     confidence: float = Field(ge=0, le=1)
@@ -143,6 +153,12 @@ class ExtractionResult(BaseModel):
         if not all(set(memory.entity_candidate_ids) <= set(entity_ids) for memory in self.memories):
             raise ValueError("memory references an unknown entity candidate")
         if not all(
+            memory.primary_entity_candidate_id is None
+            or memory.primary_entity_candidate_id in memory.entity_candidate_ids
+            for memory in self.memories
+        ):
+            raise ValueError("primary_entity_candidate_id must be an attached entity")
+        if not all(
             {relation.source_candidate_id, relation.target_candidate_id} <= set(memory_ids)
             for relation in self.relations
         ):
@@ -154,14 +170,28 @@ class ResolutionDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     candidate_id: str = Field(min_length=1)
     action: ResolutionAction
-    target_ref: str | None = None
+    target_refs: list[str] = Field(default_factory=list)
+    relationship: str = Field(default="unknown", min_length=1, max_length=64)
+    effective_order: EffectiveOrder = EffectiveOrder.UNKNOWN
     confidence: float = Field(ge=0, le=1)
     reason: str = Field(min_length=1)
+    evidence_quotes: list[str] = Field(default_factory=list)
+    needs_review: bool = False
+
+    @model_validator(mode="after")
+    def validates_action_shape(self) -> ResolutionDecision:
+        if self.action in {ResolutionAction.SUPERSEDE, ResolutionAction.CONTRADICT} and not self.target_refs:
+            raise ValueError("state-changing resolution requires target_refs")
+        if self.action is ResolutionAction.SUPERSEDE and self.effective_order is EffectiveOrder.UNKNOWN:
+            raise ValueError("SUPERSEDE requires a known effective_order")
+        if self.action is ResolutionAction.MERGE_PROVENANCE and len(self.target_refs) > 1:
+            raise ValueError("MERGE_PROVENANCE accepts at most one target")
+        return self
 
 
 class MemoryResolutionResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal["memory-resolution-v1"]
+    schema_version: Literal["memory-resolution-v2"]
     decisions: list[ResolutionDecision]
 
 

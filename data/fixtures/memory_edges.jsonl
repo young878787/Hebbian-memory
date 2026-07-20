@@ -2,7 +2,7 @@
 {"source_external_id":"M6","target_external_id":"M3","edge_type":"temporal","weight":0.25,"metadata":{}}
 {"source_external_id":"M3","target_external_id":"M4","edge_type":"temporal","weight":0.25,"metadata":{}}
 {"source_external_id":"M4","target_external_id":"M5","edge_type":"temporal","weight":0.25,"metadata":{}}
-{"source_external_id":"M1","target_external_id":"M4","edge_type":"semantic","weight":0.24,"metadata":{}}
+{"source_external_id":"M1","target_external_id":"M4","edge_type":"semantic","weight":0.75,"metadata":{"origin":"fixture-gpu-topic-cluster"}}
 {"source_external_id":"M4","target_external_id":"M7","edge_type":"semantic","weight":0.25,"metadata":{}}
 {"source_external_id":"M5","target_external_id":"M7","edge_type":"semantic","weight":0.26,"metadata":{}}
 {"source_external_id":"M3","target_external_id":"M1","edge_type":"supersedes","weight":1.0,"metadata":{}}
@@ -11,3 +11,11 @@
 {"source_external_id":"M9","target_external_id":"M10","edge_type":"semantic","weight":0.22,"metadata":{}}
 {"source_external_id":"M19","target_external_id":"M20","edge_type":"temporal","weight":0.25,"metadata":{}}
 {"source_external_id":"M21","target_external_id":"M22","edge_type":"supports","weight":1.0,"metadata":{}}
+{"source_external_id":"M9","target_external_id":"M11","edge_type":"semantic","weight":0.30,"metadata":{"origin":"fixture-topic-cluster"}}
+{"source_external_id":"M9","target_external_id":"M12","edge_type":"semantic","weight":0.30,"metadata":{"origin":"fixture-topic-cluster"}}
+{"source_external_id":"M6","target_external_id":"M4","edge_type":"temporal","weight":0.25,"metadata":{"origin":"fixture-state-transition"}}
+{"source_external_id":"M4","target_external_id":"M6","edge_type":"temporal","weight":0.25,"metadata":{"origin":"fixture-state-transition"}}
+{"source_external_id":"M4","target_external_id":"M3","edge_type":"temporal","weight":0.25,"metadata":{"origin":"fixture-state-transition"}}
+{"source_external_id":"M4","target_external_id":"M3","edge_type":"semantic","weight":0.75,"metadata":{"origin":"fixture-ambiguous-gpu"}}
+{"source_external_id":"M32","target_external_id":"M2","edge_type":"supports","weight":0.60,"metadata":{"origin":"fixture-risk-cluster"}}
+{"source_external_id":"M32","target_external_id":"M5","edge_type":"supports","weight":0.60,"metadata":{"origin":"fixture-risk-cluster"}}

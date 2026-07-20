@@ -7,10 +7,14 @@ import json
 import os
 import sys
 
+from sqlalchemy import select
+
 from .config import load_config
 from .db import create_db_engine, session_factory, verify_database_target
 from .embedding import EmbeddingClient
 from .fixtures import load_fixture_bundle
+from .memory_store import get_namespace
+from .models import MemoryCandidate, MemoryResolutionDecision
 from .pipeline import ask, evaluate, ingest
 from .provider import GoogleProvider
 from .settings import get_settings
@@ -50,9 +54,9 @@ def _smoke() -> dict:
     }
 
 
-def _database_session():
+def _database_session(*, require_google: bool = True):
     settings = get_settings()
-    if missing := settings.missing(include_google=True):
+    if missing := settings.missing(include_google=require_google):
         raise ValueError(f"missing required configuration: {', '.join(missing)}")
     engine = create_db_engine(settings)
     verify_database_target(engine, settings)
@@ -68,6 +72,15 @@ def build_parser() -> argparse.ArgumentParser:
     ask_command.add_argument("query")
     ask_command.add_argument("--learn", action="store_true")
     commands.add_parser("evaluate")
+    resolve = commands.add_parser("resolve")
+    resolve.add_argument("--namespace", required=True)
+    resolve.add_argument("--dry-run", action="store_true", default=True)
+    resolve.add_argument("--apply", action="store_true")
+    report = commands.add_parser("resolution-report")
+    report.add_argument("--namespace", required=True)
+    backfill = commands.add_parser("backfill-resolution")
+    backfill.add_argument("--namespace", required=True)
+    backfill.add_argument("--report-only", action="store_true", default=True)
     return parser
 
 
@@ -114,6 +127,33 @@ def main(argv: list[str] | None = None) -> int:
                     extractor_model=settings.google_model,
                 )
             _print_json({"summary": "results/pipeline/summary.json", "status": summary["status"]})
+        elif args.command in {"resolve", "resolution-report", "backfill-resolution"}:
+            if args.command == "resolve" and args.apply:
+                raise ValueError("live resolution apply is disabled; review resolution-report first")
+            with _database_session(require_google=False) as session:
+                namespace = get_namespace(session, args.namespace, create=False)
+                candidates = session.scalars(
+                    select(MemoryCandidate).where(MemoryCandidate.namespace_id == namespace.id)
+                ).all()
+                decisions = session.scalars(
+                    select(MemoryResolutionDecision).where(
+                        MemoryResolutionDecision.namespace_id == namespace.id
+                    )
+                ).all()
+                _print_json(
+                    {
+                        "namespace": args.namespace,
+                        "candidate_statuses": {
+                            status: sum(item.status == status for item in candidates)
+                            for status in ("pending", "resolving", "resolved", "deferred", "failed")
+                        },
+                        "decisions": [
+                            {"action": item.action, "validation_status": item.validation_status}
+                            for item in decisions
+                        ],
+                        "apply": False,
+                    }
+                )
         return 0
     except ValueError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)

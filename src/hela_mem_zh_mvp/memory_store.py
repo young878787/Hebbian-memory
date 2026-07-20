@@ -8,24 +8,30 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .candidate_search import find_scoped_candidates
+from .config import ResolutionConfig
 from .edges import upsert_edge
 from .embedding import EmbeddingClient
 from .ingestion import content_hash
 from .models import (
     Entity,
+    EntityAlias,
     IngestionRun,
     Memory,
+    MemoryCandidate,
     MemoryEdge,
     MemoryEntity,
     MemoryNamespace,
+    MemoryResolutionDecision,
     RetrievalItem,
     RetrievalRun,
 )
 from .models import (
     SourceMessage as StoredSourceMessage,
 )
-from .resolver import canonical_key, resolve_memory
-from .schemas import EdgeType, ExtractionResult, SourceMessage
+from .normalization import NORMALIZER_VERSION, TOPIC_VERSION, normalize_lookup, state_key, topic_key
+from .resolver import candidate_key, canonical_key, resolve_memory, snapshot_hash
+from .schemas import EdgeType, ExtractionResult, ResolutionAction, SourceMessage
 
 FIXTURE_NAMESPACE = "fixture-pipeline-v1"
 
@@ -59,6 +65,19 @@ def _entity(
     aliases: list[str],
     confidence: float,
 ) -> Entity:
+    canonical_normalized = normalize_lookup(canonical_name)
+    aliases_by_key = {normalize_lookup(value): value for value in [canonical_name, *aliases]}
+    alias_matches = session.scalars(
+        select(EntityAlias).where(
+            EntityAlias.namespace_id == namespace_id,
+            EntityAlias.entity_type == entity_type,
+            EntityAlias.alias_normalized.in_(list(aliases_by_key)),
+            EntityAlias.status == "active",
+        )
+    ).all()
+    matched_ids = {item.entity_id for item in alias_matches}
+    if len(matched_ids) > 1:
+        raise StoreError(f"entity alias collision for {canonical_name!r}")
     entity = session.scalar(
         select(Entity).where(
             Entity.namespace_id == namespace_id,
@@ -66,6 +85,10 @@ def _entity(
             Entity.canonical_name == canonical_name,
         )
     )
+    if entity is not None and matched_ids and entity.id not in matched_ids:
+        raise StoreError(f"canonical/alias entity collision for {canonical_name!r}")
+    if entity is None and matched_ids:
+        entity = session.get(Entity, next(iter(matched_ids)))
     if entity is None:
         entity = Entity(
             namespace_id=namespace_id,
@@ -79,6 +102,30 @@ def _entity(
     else:
         entity.aliases = _merge_unique(entity.aliases, aliases)
         entity.confidence = max(entity.confidence, confidence)
+    for normalized, raw in aliases_by_key.items():
+        alias = session.scalar(
+            select(EntityAlias).where(
+                EntityAlias.namespace_id == namespace_id,
+                EntityAlias.entity_type == entity_type,
+                EntityAlias.alias_normalized == normalized,
+            )
+        )
+        if alias is not None and alias.entity_id != entity.id:
+            raise StoreError(f"entity alias collision for {raw!r}")
+        if alias is None:
+            session.add(
+                EntityAlias(
+                    namespace_id=namespace_id,
+                    entity_id=entity.id,
+                    entity_type=entity_type,
+                    alias_raw=raw,
+                    alias_normalized=normalized,
+                    source_type="canonical" if normalized == canonical_normalized else "extractor",
+                    confidence=confidence,
+                    status="active",
+                    normalizer_version=NORMALIZER_VERSION,
+                )
+            )
     return entity
 
 
@@ -90,6 +137,7 @@ def write_ingestion(
     embeddings: EmbeddingClient,
     *,
     extractor_model: str,
+    resolution: ResolutionConfig,
     external_id_by_canonical_key: dict[str, str] | None = None,
 ) -> dict[str, int]:
     """Write one fully validated extraction atomically; caller owns commit/rollback."""
@@ -133,12 +181,78 @@ def write_ingestion(
         for item in extraction.entities
     }
     memory_by_candidate: dict[str, Memory] = {}
-    counts = {"created": 0, "merged": 0, "superseded": 0, "contradicted": 0, "ignored": 0}
+    counts = {
+        "created": 0,
+        "merged": 0,
+        "superseded": 0,
+        "contradicted": 0,
+        "ignored": 0,
+        "deferred": 0,
+    }
     created_memories: list[Memory] = []
     for candidate in extraction.memories:
-        resolution = resolve_memory(session, namespace.id, candidate)
-        if resolution.existing:
-            memory = resolution.existing
+        normalized_topic = topic_key(candidate.concepts[0] if candidate.concepts else None)
+        entity_ids = [entity_by_candidate[item].id for item in candidate.entity_candidate_ids]
+        embedding = embeddings.embed(candidate.content)
+        scoped = find_scoped_candidates(
+            session,
+            namespace.id,
+            embedding=embedding,
+            memory_type=candidate.memory_type.value,
+            topic_key=normalized_topic,
+            entity_ids=entity_ids,
+            limit=resolution.candidate_limit,
+        )
+        stage_key = candidate_key(
+            namespace.id, candidate, entity_ids=entity_ids, topic_key=normalized_topic
+        )
+        staged = session.scalar(
+            select(MemoryCandidate).where(
+                MemoryCandidate.namespace_id == namespace.id,
+                MemoryCandidate.candidate_key == stage_key,
+            )
+        )
+        if staged is None:
+            staged = MemoryCandidate(
+                namespace_id=namespace.id,
+                ingestion_run_id=run.id,
+                candidate_key=stage_key,
+                extraction_payload=candidate.model_dump(mode="json"),
+                normalized_payload={
+                    "topic_key": normalized_topic,
+                    "attribute_key": candidate.attribute_key or "unknown",
+                    "entity_ids": [str(value) for value in entity_ids],
+                },
+                embedding=embedding,
+            )
+            session.add(staged)
+            session.flush()
+        resolution_result = resolve_memory(session, namespace.id, candidate, candidates=scoped)
+        before_state = {str(item.memory.id): item.memory.status for item in scoped}
+        if resolution_result.action is ResolutionAction.DEFER:
+            staged.status = "deferred"
+            counts["deferred"] += 1
+            session.add(
+                MemoryResolutionDecision(
+                    namespace_id=namespace.id,
+                    candidate_id=staged.id,
+                    resolver_kind="deterministic",
+                    resolver_schema_version=resolution.resolver_schema_version,
+                    prompt_version=resolution.prompt_version,
+                    candidate_snapshot_hash=snapshot_hash(scoped),
+                    action=ResolutionAction.DEFER.value,
+                    target_memory_ids=[str(item.memory.id) for item in scoped],
+                    confidence=0.0,
+                    reason=resolution_result.reason,
+                    evidence_quotes=[],
+                    validation_status="deferred",
+                    before_state=before_state,
+                    after_state=before_state,
+                )
+            )
+            continue
+        if resolution_result.existing:
+            memory = resolution_result.existing
             memory.source_message_ids = _merge_unique(
                 memory.source_message_ids, candidate.evidence_message_ids
             )
@@ -156,6 +270,16 @@ def write_ingestion(
                 content=candidate.content,
                 memory_type=candidate.memory_type.value,
                 topic=candidate.concepts[0] if candidate.concepts else None,
+                topic_raw=candidate.concepts[0] if candidate.concepts else None,
+                topic_key=normalized_topic,
+                topic_version=TOPIC_VERSION if normalized_topic else None,
+                attribute_key=candidate.attribute_key or "unknown",
+                state_key=state_key(
+                    entity_ids[0] if len(entity_ids) == 1 else None,
+                    candidate.memory_type.value,
+                    normalized_topic,
+                    candidate.attribute_key,
+                ),
                 occurred_at=candidate.occurred_at,
                 importance=candidate.importance,
                 confidence=candidate.confidence,
@@ -165,13 +289,32 @@ def write_ingestion(
                     if message.message_id == candidate.evidence_message_ids[0]
                 ),
                 source_message_ids=candidate.evidence_message_ids,
-                embedding=embeddings.embed(candidate.content),
-                metadata_={"origin": "extractor"},
+                embedding=embedding,
+                metadata_={"origin": "extractor", "resolution_scope": "entity_topic" if entity_ids and normalized_topic else "no_entity_or_topic"},
             )
             session.add(memory)
             session.flush()
             created_memories.append(memory)
             counts["created"] += 1
+        staged.status = "resolved"
+        session.add(
+            MemoryResolutionDecision(
+                namespace_id=namespace.id,
+                candidate_id=staged.id,
+                resolver_kind="deterministic",
+                resolver_schema_version=resolution.resolver_schema_version,
+                prompt_version=resolution.prompt_version,
+                candidate_snapshot_hash=snapshot_hash(scoped),
+                action=resolution_result.action.value,
+                target_memory_ids=[str(memory.id)] if resolution_result.existing else [],
+                confidence=1.0,
+                reason=resolution_result.reason,
+                evidence_quotes=[candidate.evidence],
+                validation_status="passed",
+                before_state=before_state,
+                after_state={str(memory.id): memory.status},
+            )
+        )
         memory_by_candidate[candidate.candidate_id] = memory
         for entity_id in candidate.entity_candidate_ids:
             entity = entity_by_candidate[entity_id]
@@ -181,10 +324,23 @@ def write_ingestion(
                         namespace_id=namespace.id,
                         memory_id=memory.id,
                         entity_id=entity.id,
+                        mention_role=(
+                            "subject"
+                            if candidate.primary_entity_candidate_id == entity_id
+                            or (candidate.primary_entity_candidate_id is None and entity_id == candidate.entity_candidate_ids[0])
+                            else "mentioned"
+                        ),
                         confidence=candidate.confidence,
                     )
                 )
     for relation in extraction.relations:
+        if (
+            relation.source_candidate_id not in memory_by_candidate
+            or relation.target_candidate_id not in memory_by_candidate
+        ):
+            # One endpoint is deferred; creating an edge would incorrectly
+            # make an unresolved comparison visible as a resolved fact.
+            continue
         source, target = (
             memory_by_candidate[relation.source_candidate_id],
             memory_by_candidate[relation.target_candidate_id],
@@ -204,25 +360,29 @@ def write_ingestion(
         elif relation.edge_type is EdgeType.CONTRADICTS:
             counts["contradicted"] += 1
     for memory in created_memories:
-        neighbors = session.scalars(
-            select(Memory)
-            .where(Memory.namespace_id == namespace.id, Memory.id != memory.id)
-            .order_by(Memory.created_at.desc())
-            .limit(5)
-        ).all()
-        for neighbor in neighbors:
-            similarity = sum(
-                a * b for a, b in zip(memory.embedding, neighbor.embedding, strict=True)
+        entity_ids = session.scalars(
+            select(MemoryEntity.entity_id).where(
+                MemoryEntity.namespace_id == namespace.id, MemoryEntity.memory_id == memory.id
             )
-            if similarity >= 0.72:
+        ).all()
+        for neighbor in find_scoped_candidates(
+            session,
+            namespace.id,
+            embedding=memory.embedding,
+            memory_type=memory.memory_type,
+            topic_key=memory.topic_key,
+            entity_ids=entity_ids,
+            limit=resolution.candidate_limit,
+        ):
+            if neighbor.memory.id != memory.id and neighbor.similarity >= resolution.ambiguous_similarity_min:
                 upsert_edge(
                     session,
                     namespace.id,
                     memory.id,
-                    neighbor.id,
+                    neighbor.memory.id,
                     EdgeType.SEMANTIC,
-                    similarity,
-                    {"origin": "resolver"},
+                    neighbor.similarity,
+                    {"origin": "scoped_pgvector"},
                 )
         prior = session.scalar(
             select(Memory)
@@ -268,6 +428,11 @@ def reset_test_namespace(session: Session) -> None:
         synchronize_session=False
     )
     session.query(MemoryEdge).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
+    candidate_ids = select(MemoryCandidate.id).where(MemoryCandidate.namespace_id == namespace_id)
+    session.query(MemoryResolutionDecision).filter(
+        MemoryResolutionDecision.candidate_id.in_(candidate_ids)
+    ).delete(synchronize_session=False)
+    session.query(MemoryCandidate).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
     session.query(MemoryEntity).filter_by(namespace_id=namespace_id).delete(
         synchronize_session=False
     )

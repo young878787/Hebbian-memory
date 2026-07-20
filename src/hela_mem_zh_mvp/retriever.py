@@ -175,15 +175,31 @@ class Retriever:
             chosen = sorted(items, key=_tie_key)[:final_top_k]
         else:
             seed_ids = {item.memory.id for item in seeds}
+            contradictions = sorted(
+                (
+                    item
+                    for item in items
+                    if item.memory.id not in seed_ids
+                    and any(path["edge_type"] == EdgeType.CONTRADICTS.value for path in item.activation_path)
+                ),
+                key=_tie_key,
+            )
             bonus = sorted(
                 (
                     item
                     for item in items
-                    if item.memory.id not in seed_ids and item.hebbian_score > 0
+                    if item.memory.id not in seed_ids
+                    and item.hebbian_score > 0
+                    and item not in contradictions
                 ),
                 key=_tie_key,
-            )[: max(0, final_top_k - len(seeds))]
-            chosen = sorted([*seeds, *bonus], key=_tie_key)[:final_top_k]
+            )
+            # Contradictions are selected as traceable context, not because
+            # they receive a positive association score.
+            remaining = max(0, final_top_k - len(seeds))
+            chosen = sorted([*seeds, *contradictions[:remaining]], key=_tie_key)
+            chosen.extend(bonus[: max(0, final_top_k - len(chosen))])
+            chosen = sorted(chosen, key=_tie_key)[:final_top_k]
         for rank, item in enumerate(chosen, start=1):
             item.selected = True
             item.final_rank = rank

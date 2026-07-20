@@ -11,6 +11,19 @@ retrieval:
 learning:
   co_retrieval_increment: 0.02
   max_edge_weight: 1.0
+resolution:
+  candidate_limit: 8
+  ambiguous_similarity_min: 0.72
+  exact_merge_similarity: 0.96
+  deterministic_confidence_min: 0.95
+  ai_decision_confidence_min: 0.85
+  supersede_confidence_min: 0.90
+  event_time_tolerance_seconds: 60
+  max_ai_attempts: 2
+  resolver_schema_version: memory-resolution-v2
+  prompt_version: resolver-zh-v1
+evaluation:
+  answer_request_interval_seconds: 4.2
 status_adjustments:
   historical: {active: 0.00, superseded: 0.00, uncertain: -0.15, archived: -0.25}
   current: {active: 0.15, superseded: -0.35, uncertain: -0.20, archived: -0.40}
