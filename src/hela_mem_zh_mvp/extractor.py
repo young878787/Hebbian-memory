@@ -22,6 +22,8 @@ def extract_messages(
         "不可改寫、翻譯、摘要、補上標點或合併不同句子。若無法提供這種逐字證據，請略過該 entity 或 memory。"
         "memory 可選填 attribute_key（可更新的狀態欄位）與 primary_entity_candidate_id；不確定時省略 attribute_key，"
         "不要猜測人物別名或跨語言同一性。"
+        "若同一批 memories 明確表達前後狀態改變或無法判定順序的互斥內容，必須填相同的 attribute_key，"
+        "並建立 supersedes 或 contradicts relation；relation.evidence 必須是來源中的逐字證據。"
         "不得輸出資料庫 ID、namespace、SQL 或 edge weight。\n"
         f"來源訊息：{json.dumps(payload, ensure_ascii=False)}"
     )

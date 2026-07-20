@@ -30,8 +30,22 @@ from .models import (
     SourceMessage as StoredSourceMessage,
 )
 from .normalization import NORMALIZER_VERSION, TOPIC_VERSION, normalize_lookup, state_key, topic_key
-from .resolver import candidate_key, canonical_key, resolve_memory, snapshot_hash
-from .schemas import EdgeType, ExtractionResult, ResolutionAction, SourceMessage
+from .resolution_store import ResolutionApplyError, apply_resolution
+from .resolver import (
+    Resolution,
+    candidate_key,
+    canonical_key,
+    reliable_order,
+    resolve_memory,
+    snapshot_hash,
+)
+from .schemas import (
+    EdgeType,
+    ExtractionResult,
+    ResolutionAction,
+    ResolutionDecision,
+    SourceMessage,
+)
 
 FIXTURE_NAMESPACE = "fixture-pipeline-v1"
 
@@ -55,6 +69,21 @@ def get_namespace(session: Session, namespace_key: str, *, create: bool = True) 
 
 def _merge_unique(values: list[str] | None, additions: list[str]) -> list[str]:
     return list(dict.fromkeys([*(values or []), *additions]))
+
+
+def _resolution_topic_key(
+    candidate_id: str,
+    concepts: list[str],
+    entity_candidate_ids: list[str],
+    entity_by_candidate: dict[str, Entity],
+) -> tuple[str | None, str | None]:
+    """Return explicit topic or a safe single-entity fallback for state slots."""
+    if normalized := topic_key(concepts[0] if concepts else None):
+        return normalized, TOPIC_VERSION
+    if len(entity_candidate_ids) == 1:
+        entity = entity_by_candidate[entity_candidate_ids[0]]
+        return f"entity_{normalize_lookup(entity.canonical_name)}", "entity-fallback-v1"
+    return None, None
 
 
 def _entity(
@@ -181,6 +210,13 @@ def write_ingestion(
         for item in extraction.entities
     }
     memory_by_candidate: dict[str, Memory] = {}
+    staged_by_candidate: dict[str, MemoryCandidate] = {}
+    explicit_state_relation_ids = {
+        candidate_id
+        for relation in extraction.relations
+        if relation.edge_type in {EdgeType.SUPERSEDES, EdgeType.CONTRADICTS}
+        for candidate_id in (relation.source_candidate_id, relation.target_candidate_id)
+    }
     counts = {
         "created": 0,
         "merged": 0,
@@ -191,7 +227,12 @@ def write_ingestion(
     }
     created_memories: list[Memory] = []
     for candidate in extraction.memories:
-        normalized_topic = topic_key(candidate.concepts[0] if candidate.concepts else None)
+        normalized_topic, normalized_topic_version = _resolution_topic_key(
+            candidate.candidate_id,
+            candidate.concepts,
+            candidate.entity_candidate_ids,
+            entity_by_candidate,
+        )
         entity_ids = [entity_by_candidate[item].id for item in candidate.entity_candidate_ids]
         embedding = embeddings.embed(candidate.content)
         scoped = find_scoped_candidates(
@@ -227,8 +268,21 @@ def write_ingestion(
             )
             session.add(staged)
             session.flush()
+        staged_by_candidate[candidate.candidate_id] = staged
         resolution_result = resolve_memory(session, namespace.id, candidate, candidates=scoped)
         before_state = {str(item.memory.id): item.memory.status for item in scoped}
+        if (
+            resolution_result.action is ResolutionAction.DEFER
+            and candidate.candidate_id in explicit_state_relation_ids
+        ):
+            # The extractor supplied a relation only among this validated
+            # batch.  Persist both endpoints, then let the atomic resolver
+            # validate state-slot, direction, and cycle constraints below.
+            resolution_result = Resolution(
+                ResolutionAction.CREATE,
+                candidates=resolution_result.candidates,
+                reason="explicit extractor state relation pending atomic validation",
+            )
         if resolution_result.action is ResolutionAction.DEFER:
             staged.status = "deferred"
             counts["deferred"] += 1
@@ -272,7 +326,7 @@ def write_ingestion(
                 topic=candidate.concepts[0] if candidate.concepts else None,
                 topic_raw=candidate.concepts[0] if candidate.concepts else None,
                 topic_key=normalized_topic,
-                topic_version=TOPIC_VERSION if normalized_topic else None,
+                topic_version=normalized_topic_version,
                 attribute_key=candidate.attribute_key or "unknown",
                 state_key=state_key(
                     entity_ids[0] if len(entity_ids) == 1 else None,
@@ -318,7 +372,7 @@ def write_ingestion(
         memory_by_candidate[candidate.candidate_id] = memory
         for entity_id in candidate.entity_candidate_ids:
             entity = entity_by_candidate[entity_id]
-            if session.get(MemoryEntity, (namespace.id, memory.id, entity.id)) is None:
+            if session.get(MemoryEntity, (memory.id, entity.id)) is None:
                 session.add(
                     MemoryEntity(
                         namespace_id=namespace.id,
@@ -345,6 +399,61 @@ def write_ingestion(
             memory_by_candidate[relation.source_candidate_id],
             memory_by_candidate[relation.target_candidate_id],
         )
+        if relation.edge_type in {EdgeType.SUPERSEDES, EdgeType.CONTRADICTS}:
+            order = reliable_order(
+                source.occurred_at,
+                target.occurred_at,
+                resolution.event_time_tolerance_seconds,
+            )
+            decision = ResolutionDecision(
+                candidate_id=relation.source_candidate_id,
+                action=(
+                    ResolutionAction.SUPERSEDE
+                    if relation.edge_type is EdgeType.SUPERSEDES
+                    else ResolutionAction.CONTRADICT
+                ),
+                target_refs=[relation.target_candidate_id],
+                relationship=(
+                    "same_state_changed"
+                    if relation.edge_type is EdgeType.SUPERSEDES
+                    else "mutually_exclusive"
+                ),
+                effective_order=order,
+                confidence=1.0,
+                reason=relation.evidence,
+                evidence_quotes=[relation.evidence],
+            )
+            try:
+                before = {str(item.id): item.status for item in (source, target)}
+                after = apply_resolution(session, namespace.id, source, decision, [target])
+            except ResolutionApplyError as exc:
+                raise StoreError(
+                    f"invalid extractor {relation.edge_type.value} relation "
+                    f"{relation.source_candidate_id}->{relation.target_candidate_id}: {exc}"
+                ) from exc
+            session.add(
+                MemoryResolutionDecision(
+                    namespace_id=namespace.id,
+                    candidate_id=staged_by_candidate[relation.source_candidate_id].id,
+                    resolver_kind="extractor",
+                    resolver_schema_version=resolution.resolver_schema_version,
+                    prompt_version=resolution.prompt_version,
+                    candidate_snapshot_hash=snapshot_hash([]),
+                    action=decision.action.value,
+                    target_memory_ids=[str(target.id)],
+                    confidence=decision.confidence,
+                    reason=decision.reason,
+                    evidence_quotes=decision.evidence_quotes,
+                    validation_status="passed",
+                    before_state=before,
+                    after_state=after,
+                )
+            )
+            if relation.edge_type is EdgeType.SUPERSEDES:
+                counts["superseded"] += 1
+            else:
+                counts["contradicted"] += 1
+            continue
         upsert_edge(
             session,
             namespace.id,
@@ -354,11 +463,6 @@ def write_ingestion(
             1.0,
             {"origin": "extractor", "evidence": relation.evidence},
         )
-        if relation.edge_type is EdgeType.SUPERSEDES:
-            target.status = "superseded"
-            counts["superseded"] += 1
-        elif relation.edge_type is EdgeType.CONTRADICTS:
-            counts["contradicted"] += 1
     for memory in created_memories:
         entity_ids = session.scalars(
             select(MemoryEntity.entity_id).where(
@@ -415,9 +519,9 @@ def write_ingestion(
     return {"messages": len(messages), **counts}
 
 
-def reset_test_namespace(session: Session) -> None:
-    """The only destructive reset. The key is deliberately not caller configurable."""
-    namespace = get_namespace(session, FIXTURE_NAMESPACE, create=False)
+def reset_namespace(session: Session, namespace_key: str) -> None:
+    """Delete one explicitly named namespace; caller owns the transaction."""
+    namespace = get_namespace(session, namespace_key, create=False)
     namespace_id = namespace.id
     run_ids = select(IngestionRun.id).where(IngestionRun.namespace_id == namespace_id)
     retrieval_ids = select(RetrievalRun.id).where(RetrievalRun.namespace_id == namespace_id)
@@ -444,3 +548,8 @@ def reset_test_namespace(session: Session) -> None:
     session.query(IngestionRun).filter(IngestionRun.id.in_(run_ids)).delete(
         synchronize_session=False
     )
+
+
+def reset_test_namespace(session: Session) -> None:
+    """The evaluation reset is deliberately fixed to its reserved namespace."""
+    reset_namespace(session, FIXTURE_NAMESPACE)

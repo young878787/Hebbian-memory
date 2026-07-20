@@ -1,0 +1,2 @@
+{"message_id":"live-conflict-001","session_id":"live-conflict-01","role":"user","content":"我現在決定購買 RTX 3090。","occurred_at":"2026-04-01T12:00:00+08:00","metadata":{"test_case":"contradict"}}
+{"message_id":"live-conflict-002","session_id":"live-conflict-01","role":"user","content":"我現在決定不購買 RTX 3090。這兩個說法的先後無法確認。","occurred_at":"2026-04-01T12:00:00+08:00","metadata":{"test_case":"contradict"}}

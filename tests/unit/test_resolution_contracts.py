@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from hela_mem_zh_mvp.config import ResolutionConfig
+from hela_mem_zh_mvp.memory_store import _resolution_topic_key
+from hela_mem_zh_mvp.models import Entity
 from hela_mem_zh_mvp.normalization import normalize_lookup, state_key, topic_key
 from hela_mem_zh_mvp.resolver import validate_ai_decision
 from hela_mem_zh_mvp.schemas import EffectiveOrder, ResolutionAction, ResolutionDecision
@@ -30,6 +32,15 @@ def test_normalization_is_conservative_and_deterministic() -> None:
         "entity-1", "decision", "gpu_purchase", "owned_item"
     )
     assert state_key("entity-1", "decision", "gpu_purchase", "unknown") is None
+
+
+def test_single_entity_fallback_topic_is_only_used_when_scope_is_unambiguous() -> None:
+    entity = Entity(canonical_name="RTX 3090", entity_type="concept", confidence=1.0)
+    assert _resolution_topic_key("m-1", [], ["rtx"], {"rtx": entity}) == (
+        "entity_rtx3090",
+        "entity-fallback-v1",
+    )
+    assert _resolution_topic_key("m-1", [], [], {}) == (None, None)
 
 
 def test_resolution_schema_rejects_unknown_supersede_order() -> None:
@@ -63,3 +74,7 @@ def test_ai_post_validation_rejects_target_outside_snapshot() -> None:
         )
         == "target outside supplied snapshot"
     )
+
+
+def test_extractor_resolver_kind_fits_the_persisted_contract() -> None:
+    assert len("extractor") <= 16

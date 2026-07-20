@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -13,11 +14,18 @@ from .config import load_config
 from .db import create_db_engine, session_factory, verify_database_target
 from .embedding import EmbeddingClient
 from .fixtures import load_fixture_bundle
+from .live_evaluation import run_live_resolver_evaluation
 from .memory_store import get_namespace
 from .models import MemoryCandidate, MemoryResolutionDecision
 from .pipeline import ask, evaluate, ingest
 from .provider import GoogleProvider
 from .settings import get_settings
+from .single_evaluation import (
+    DEFAULT_INPUT_PATH,
+    DEFAULT_QUERY,
+    DEFAULT_QUERY_ID,
+    run_single_e2e_evaluation,
+)
 
 
 def _print_json(value: object) -> None:
@@ -72,6 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
     ask_command.add_argument("query")
     ask_command.add_argument("--learn", action="store_true")
     commands.add_parser("evaluate")
+    commands.add_parser("live-resolver-evaluate")
+    single_e2e = commands.add_parser("single-e2e-evaluate")
+    single_e2e.add_argument("--input", type=Path, default=DEFAULT_INPUT_PATH)
+    single_e2e.add_argument("--query", default=DEFAULT_QUERY)
+    single_e2e.add_argument("--query-id", default=DEFAULT_QUERY_ID)
     resolve = commands.add_parser("resolve")
     resolve.add_argument("--namespace", required=True)
     resolve.add_argument("--dry-run", action="store_true", default=True)
@@ -127,9 +140,36 @@ def main(argv: list[str] | None = None) -> int:
                     extractor_model=settings.google_model,
                 )
             _print_json({"summary": "results/pipeline/summary.json", "status": summary["status"]})
+        elif args.command == "live-resolver-evaluate":
+            with _database_session() as session:
+                summary = run_live_resolver_evaluation(
+                    session,
+                    GoogleProvider(settings),
+                    EmbeddingClient(settings),
+                    extractor_model=settings.google_model,
+                )
+            _print_json(
+                {"summary": "results/live_resolver/summary.json", "status": summary["status"]}
+            )
+        elif args.command == "single-e2e-evaluate":
+            with _database_session() as session:
+                summary = run_single_e2e_evaluation(
+                    session,
+                    GoogleProvider(settings),
+                    EmbeddingClient(settings),
+                    load_config(),
+                    extractor_model=settings.google_model,
+                    input_path=args.input,
+                    query=args.query,
+                    query_id=args.query_id,
+                )
+            _print_json({"summary": "results/single_e2e/summary.json", "status": summary["status"]})
+            return 0 if summary["status"] == "PASS" else 1
         elif args.command in {"resolve", "resolution-report", "backfill-resolution"}:
             if args.command == "resolve" and args.apply:
-                raise ValueError("live resolution apply is disabled; review resolution-report first")
+                raise ValueError(
+                    "live resolution apply is disabled; review resolution-report first"
+                )
             with _database_session(require_google=False) as session:
                 namespace = get_namespace(session, args.namespace, create=False)
                 candidates = session.scalars(
