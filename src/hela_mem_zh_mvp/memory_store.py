@@ -553,3 +553,15 @@ def reset_namespace(session: Session, namespace_key: str) -> None:
 def reset_test_namespace(session: Session) -> None:
     """The evaluation reset is deliberately fixed to its reserved namespace."""
     reset_namespace(session, FIXTURE_NAMESPACE)
+
+
+def purge_namespace(session: Session, namespace_key: str) -> bool:
+    """Delete an explicitly named namespace and its data; caller owns the transaction."""
+    try:
+        namespace = get_namespace(session, namespace_key, create=False)
+    except ValueError:
+        return False
+    reset_namespace(session, namespace_key)
+    session.delete(namespace)
+    session.flush()
+    return True

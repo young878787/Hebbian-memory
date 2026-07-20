@@ -22,8 +22,8 @@ from .provider import GoogleProvider
 from .settings import get_settings
 from .single_evaluation import (
     DEFAULT_INPUT_PATH,
-    DEFAULT_QUERY,
     DEFAULT_QUERY_ID,
+    DEFAULT_QUERY_LIMIT,
     run_single_e2e_evaluation,
 )
 
@@ -81,10 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     ask_command.add_argument("--learn", action="store_true")
     commands.add_parser("evaluate")
     commands.add_parser("live-resolver-evaluate")
-    single_e2e = commands.add_parser("single-e2e-evaluate")
-    single_e2e.add_argument("--input", type=Path, default=DEFAULT_INPUT_PATH)
-    single_e2e.add_argument("--query", default=DEFAULT_QUERY)
-    single_e2e.add_argument("--query-id", default=DEFAULT_QUERY_ID)
+    for name in ("run", "single-e2e-evaluate"):
+        run = commands.add_parser(name)
+        run.add_argument("--input", type=Path, default=DEFAULT_INPUT_PATH)
+        run.add_argument("--query")
+        run.add_argument("--query-id", default=DEFAULT_QUERY_ID)
+        run.add_argument("--query-limit", type=int, default=DEFAULT_QUERY_LIMIT)
     resolve = commands.add_parser("resolve")
     resolve.add_argument("--namespace", required=True)
     resolve.add_argument("--dry-run", action="store_true", default=True)
@@ -151,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(
                 {"summary": "results/live_resolver/summary.json", "status": summary["status"]}
             )
-        elif args.command == "single-e2e-evaluate":
+        elif args.command in {"run", "single-e2e-evaluate"}:
             with _database_session() as session:
                 summary = run_single_e2e_evaluation(
                     session,
@@ -162,8 +164,9 @@ def main(argv: list[str] | None = None) -> int:
                     input_path=args.input,
                     query=args.query,
                     query_id=args.query_id,
+                    query_limit=args.query_limit,
                 )
-            _print_json({"summary": "results/single_e2e/summary.json", "status": summary["status"]})
+            _print_json({"summary": "results/summary.json", "status": summary["status"]})
             return 0 if summary["status"] == "PASS" else 1
         elif args.command in {"resolve", "resolution-report", "backfill-resolution"}:
             if args.command == "resolve" and args.apply:

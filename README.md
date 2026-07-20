@@ -18,17 +18,18 @@ uv run pytest
 
 `smoke --component postgres|embedding` 是 retrieval 的 hard gate；Google 只影響 provider smoke。所有執行入口共用 `.env` 的 `Settings`，不接受 `DATABASE_URL`。
 
-## 單次串接驗證
+## 完整執行入口
 
-`single-e2e-evaluate` 不執行固定 fixture 的完整批次評估。每次執行都會先清除固定測試 namespace `single-e2e-v1` 的記憶、向量、edge 與相關 trace，再以一個輸入批次與一個問題依序驗證：AI extraction、resolver、retrieval、AI answer、AI judge。
+根目錄 `main.py` 是通用入口。無參數時會執行完整流程：AI extraction、resolver、30 題 retrieval、AI answer、AI judge。每次執行使用獨立暫用 namespace，結束時會刪除其所有資料與 namespace row；舊的 `single-e2e-v1` namespace 也會一併移除，不影響其他 namespace。
 
 ```powershell
-uv run hela-mem single-e2e-evaluate
-# 也可替換測試輸入與問題
-uv run hela-mem single-e2e-evaluate --input data/input/conversations.jsonl --query "使用者最後對 RTX 3090 的決定是什麼？"
+uv run python main.py
+# 可透過參數執行既有 CLI，或限制題數／改跑單題
+uv run python main.py run --query-limit 10
+uv run python main.py run --input data/input/conversations.jsonl --query "使用者最後對 RTX 3090 的決定是什麼？"
 ```
 
-結果寫入 `results/single_e2e/summary.json`。這個指令使用 `evaluation` mode，不會強化 co-retrieval edge；若任一階段契約失敗，會以非零結束碼退出。
+彙總結果寫入 `results/summary.json`；逐題資料寫入 `results/pipeline/` 的 `retrieval.json`、`answers.json`、`judge_input.json` 與 `summary.json`。`status` 表示整條執行與契約是否跑通，`quality_status` 獨立表示 AI judge 的答案品質；兩者不混為同一個 gate。這個流程使用 `evaluation` mode，不會強化 co-retrieval edge；若任一執行階段、契約或暫用 namespace 清理失敗，會以非零結束碼退出。
 
 ## 安全界線
 
