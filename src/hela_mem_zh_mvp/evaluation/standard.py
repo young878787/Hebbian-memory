@@ -122,6 +122,11 @@ def evaluate(
                     "expect_answerable": fixture_query.expect_answerable,
                     "must_include": fixture_query.must_include,
                     "must_not_primary": fixture_query.must_not_primary,
+                    "category": fixture_query.category,
+                    "suite": fixture_query.suite,
+                    "complexity": fixture_query.complexity,
+                    "architecture_targets": fixture_query.architecture_targets,
+                    "required_hops": fixture_query.required_hops,
                     "retrieved_memories": result.as_dict(),
                     "answer": answer.model_dump(),
                     "answer_error": answer_error,
@@ -147,6 +152,28 @@ def evaluate(
             if all(checks) and ai_judge["status"] == "PASS" and before == after
             else "FAIL",
             "ingestion": ingestion,
+            "coverage": {
+                "query_count": len(bundle.queries),
+                "by_suite": {
+                    suite: sum(query.suite == suite for query in bundle.queries)
+                    for suite in ("baseline", "architecture_v1")
+                },
+                "by_complexity": {
+                    complexity: sum(query.complexity == complexity for query in bundle.queries)
+                    for complexity in ("basic", "intermediate", "advanced", "adversarial")
+                },
+                "by_architecture_target": {
+                    target: sum(target in query.architecture_targets for query in bundle.queries)
+                    for target in sorted(
+                        {
+                            target
+                            for query in bundle.queries
+                            for target in query.architecture_targets
+                        }
+                    )
+                },
+                "multi_hop_queries": sum(query.required_hops >= 2 for query in bundle.queries),
+            },
             "retrieval": {
                 "query_count": len(records),
                 "must_include_pass": sum(
@@ -155,6 +182,22 @@ def evaluate(
                 "must_not_primary_violations": sum(
                     not record["deterministic_checks"]["must_not_primary"] for record in records
                 ),
+                "must_include_by_complexity": {
+                    complexity: {
+                        "passed": sum(
+                            record["deterministic_checks"]["must_include"]
+                            for record in records
+                            if record["complexity"] == complexity
+                        ),
+                        "total": sum(record["complexity"] == complexity for record in records),
+                    }
+                    for complexity in (
+                        "basic",
+                        "intermediate",
+                        "advanced",
+                        "adversarial",
+                    )
+                },
                 "edge_immutability": "PASS" if before == after else "FAIL",
             },
             "answers": {

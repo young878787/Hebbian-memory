@@ -41,11 +41,17 @@ def _load_jsonl(
     return values
 
 
-def load_fixture_bundle(directory: str | Path) -> FixtureBundle:
+def load_fixture_bundle(directory: str | Path, *, include_edges: bool = False) -> FixtureBundle:
+    """Load the fixture corpus without requiring legacy edge projections.
+
+    ``memory_edges.jsonl`` is retained as an optional research/reference
+    projection.  The default evaluation and seed path is memory-only so that
+    Hebbian retrieval does not depend on hand-authored fixture edges.
+    """
     path = Path(directory)
     try:
         memories = _load_jsonl(path / "character_memories.jsonl", FixtureMemory)
-        edges = _load_jsonl(path / "memory_edges.jsonl", FixtureEdge)
+        edges = _load_jsonl(path / "memory_edges.jsonl", FixtureEdge) if include_edges else []
         queries = _load_jsonl(path / "test_queries.jsonl", FixtureQuery)
         aliases = json.loads((path / "aliases.json").read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -73,6 +79,7 @@ def seed_fixtures(
     *,
     namespace_key: str = "legacy-mvp-v0.4",
     replace_fixtures: bool = False,
+    seed_edges: bool = False,
 ) -> int:
     namespace = session.scalar(
         select(MemoryNamespace).where(MemoryNamespace.namespace_key == namespace_key)
@@ -118,14 +125,15 @@ def seed_fixtures(
         record.metadata_ = {**item.metadata, "fixture_owned": True}
         records[item.external_id] = record
     session.flush()
-    for edge in bundle.edges:
-        upsert_edge(
-            session,
-            namespace.id,
-            records[edge.source_external_id].id,
-            records[edge.target_external_id].id,
-            edge.edge_type,
-            edge_weight(edge.edge_type, edge.weight),
-            edge.metadata,
-        )
+    if seed_edges:
+        for edge in bundle.edges:
+            upsert_edge(
+                session,
+                namespace.id,
+                records[edge.source_external_id].id,
+                records[edge.target_external_id].id,
+                edge.edge_type,
+                edge_weight(edge.edge_type, edge.weight),
+                edge.metadata,
+            )
     return len(records)

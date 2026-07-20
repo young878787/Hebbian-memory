@@ -21,7 +21,7 @@ uv run pytest
 
 ## 完整執行入口
 
-根目錄 `main.py` 是通用入口。無參數時會執行完整流程：AI extraction、resolver、30 題 retrieval、AI answer、AI judge。每次執行使用獨立暫用 namespace，結束時會刪除其所有資料與 namespace row；舊的 `single-e2e-v1` namespace 也會一併移除，不影響其他 namespace。
+根目錄 `main.py` 是通用入口。無參數時會執行完整流程：AI extraction、resolver、60 題 retrieval、AI answer、AI judge。fixture 目前包含 60 筆記憶（其中 20 筆為 `lifestyle`）與 60 題測試；題目包含 32 題 baseline 與 28 題 `architecture_v1`，並記錄複雜度、目標架構能力與必要 hop 數。每次執行使用獨立暫用 namespace，結束時會刪除其所有資料與 namespace row；舊的 `single-e2e-v1` namespace 也會一併移除，不影響其他 namespace。
 
 ```powershell
 uv run python main.py
@@ -36,5 +36,5 @@ uv run python main.py run --input data/input/conversations.jsonl --query "使用
 
 - `.env` 不會提交，也不會被 log 輸出。
 - migration 只接受 `hebbian_memory_mvp` 為目標資料庫。
-- `evaluate` 只寫 retrieval trace，絕不調整 edge。
+- `evaluate` 只寫 retrieval trace，預設不載入 `memory_edges.jsonl`，也不調整 edge；該檔案僅供 opt-in 研究／投影測試使用。
 - `sample/HeLa-Mem` 為唯讀研究參考，runtime 不 import 它。

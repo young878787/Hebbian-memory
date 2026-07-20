@@ -8,7 +8,7 @@ from hela_mem_zh_mvp.evaluation import single_e2e as single_evaluation
 def test_single_e2e_cli_accepts_batch_and_one_case_overrides() -> None:
     batch = build_parser().parse_args(["run"])
     assert batch.query is None
-    assert batch.query_limit == 30
+    assert batch.query_limit == 60
 
     one_case = build_parser().parse_args(
         [
@@ -41,6 +41,10 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
             query_id=f"case-{number}",
             query=f"問題 {number}",
             category="test",
+            suite="baseline",
+            complexity="basic",
+            architecture_targets=[],
+            required_hops=0,
             scope=SimpleNamespace(value="general"),
             expect_answerable=True,
         )
@@ -159,6 +163,16 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
         "completed": 2,
         "answers_returned": 2,
         "provider_errors": 0,
+    }
+    assert summary["coverage"] == {
+        "by_suite": {"baseline": 2, "architecture_v1": 0},
+        "by_complexity": {
+            "basic": 2,
+            "intermediate": 0,
+            "advanced": 0,
+            "adversarial": 0,
+        },
+        "multi_hop_queries": 0,
     }
     assert summary["legacy_namespace_cleanup"]["before"]["edges"] == 3
     assert summary["temporary_namespace_cleanup"]["namespace_exists_after"] is False

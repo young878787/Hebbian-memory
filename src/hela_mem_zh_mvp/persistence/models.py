@@ -28,18 +28,28 @@ class Base(DeclarativeBase):
     pass
 
 
-class MemoryNamespace(Base):
+class Timestamped:
+    """Database-backed audit timestamps for every persisted pipeline record."""
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class MemoryNamespace(Timestamped, Base):
     __tablename__ = "memory_namespaces"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     namespace_key: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict
     )
 
 
-class SourceMessage(Base):
+class SourceMessage(Timestamped, Base):
     __tablename__ = "source_messages"
     namespace_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -57,7 +67,7 @@ class SourceMessage(Base):
     )
 
 
-class IngestionRun(Base):
+class IngestionRun(Timestamped, Base):
     __tablename__ = "ingestion_runs"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     namespace_id: Mapped[uuid.UUID] = mapped_column(
@@ -80,7 +90,7 @@ class IngestionRun(Base):
     )
 
 
-class Entity(Base):
+class Entity(Timestamped, Base):
     __tablename__ = "entities"
     __table_args__ = (
         UniqueConstraint(
@@ -101,7 +111,7 @@ class Entity(Base):
     )
 
 
-class EntityAlias(Base):
+class EntityAlias(Timestamped, Base):
     __tablename__ = "entity_aliases"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -128,10 +138,9 @@ class EntityAlias(Base):
     confidence: Mapped[float] = mapped_column(REAL, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     normalizer_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class Memory(Base):
+class Memory(Timestamped, Base):
     __tablename__ = "memories"
     __table_args__ = (
         UniqueConstraint("namespace_id", "external_id", name="uq_memories_namespace_external_id"),
@@ -170,7 +179,6 @@ class Memory(Base):
     attribute_key: Mapped[str | None] = mapped_column(String(100))
     state_key: Mapped[str | None] = mapped_column(String(64))
     occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     importance: Mapped[float] = mapped_column(REAL, nullable=False, default=0.5)
     confidence: Mapped[float] = mapped_column(REAL, nullable=False, default=1.0)
@@ -182,7 +190,7 @@ class Memory(Base):
     embedding: Mapped[list[float]] = mapped_column(VECTOR(2560), nullable=False)
 
 
-class MemoryEntity(Base):
+class MemoryEntity(Timestamped, Base):
     __tablename__ = "memory_entities"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -203,7 +211,7 @@ class MemoryEntity(Base):
     confidence: Mapped[float] = mapped_column(REAL, nullable=False)
 
 
-class MemoryCandidate(Base):
+class MemoryCandidate(Timestamped, Base):
     __tablename__ = "memory_candidates"
     __table_args__ = (
         UniqueConstraint("namespace_id", "candidate_key", name="uq_memory_candidates_scope_key"),
@@ -225,13 +233,9 @@ class MemoryCandidate(Base):
     embedding: Mapped[list[float]] = mapped_column(VECTOR(2560), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
 
 
-class MemoryResolutionDecision(Base):
+class MemoryResolutionDecision(Timestamped, Base):
     __tablename__ = "memory_resolution_decisions"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     namespace_id: Mapped[uuid.UUID] = mapped_column(
@@ -253,10 +257,9 @@ class MemoryResolutionDecision(Base):
     validation_status: Mapped[str] = mapped_column(String(32), nullable=False)
     before_state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     after_state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class MemoryEdge(Base):
+class MemoryEdge(Timestamped, Base):
     __tablename__ = "memory_edges"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -290,7 +293,7 @@ class MemoryEdge(Base):
     )
 
 
-class RetrievalRun(Base):
+class RetrievalRun(Timestamped, Base):
     __tablename__ = "retrieval_runs"
     __table_args__ = (
         UniqueConstraint("namespace_id", "id", name="uq_retrieval_runs_namespace_id"),
@@ -313,14 +316,13 @@ class RetrievalRun(Base):
     retrieval_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     run_mode: Mapped[str] = mapped_column(String(16), nullable=False)
     query_scope: Mapped[str] = mapped_column(String(16), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     total_latency_ms: Mapped[float | None] = mapped_column(REAL)
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict
     )
 
 
-class RetrievalItem(Base):
+class RetrievalItem(Timestamped, Base):
     __tablename__ = "retrieval_items"
     __table_args__ = (
         ForeignKeyConstraint(

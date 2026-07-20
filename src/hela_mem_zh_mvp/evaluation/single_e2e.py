@@ -38,7 +38,7 @@ LEGACY_NAMESPACE = "single-e2e-v1"
 DEFAULT_INPUT_PATH = Path("data/input/conversations.jsonl")
 DEFAULT_QUERY = "使用者最後對 RTX 3090 的決定是什麼？"
 DEFAULT_QUERY_ID = "single-e2e-001"
-DEFAULT_QUERY_LIMIT = 30
+DEFAULT_QUERY_LIMIT = 60
 
 
 def _write_artifact(name: str, payload: Any) -> None:
@@ -238,6 +238,10 @@ def run_single_e2e_evaluation(
                 "query_id": fixture_query.query_id,
                 "query": fixture_query.query,
                 "category": fixture_query.category,
+                "suite": fixture_query.suite,
+                "complexity": fixture_query.complexity,
+                "architecture_targets": fixture_query.architecture_targets,
+                "required_hops": fixture_query.required_hops,
                 "scope": fixture_query.scope.value,
                 "expect_answerable": fixture_query.expect_answerable,
                 "retrieved_memories": retrieval,
@@ -289,6 +293,22 @@ def run_single_e2e_evaluation(
                     "provider_errors": sum(
                         record["answer_error"] is not None for record in records
                     ),
+                },
+                "coverage": {
+                    "by_suite": {
+                        suite: sum(record["suite"] == suite for record in records)
+                        for suite in ("baseline", "architecture_v1")
+                    },
+                    "by_complexity": {
+                        complexity: sum(record["complexity"] == complexity for record in records)
+                        for complexity in (
+                            "basic",
+                            "intermediate",
+                            "advanced",
+                            "adversarial",
+                        )
+                    },
+                    "multi_hop_queries": sum(record["required_hops"] >= 2 for record in records),
                 },
                 "ai_judge": {**ai_judge, "verdict_counts": verdict_counts},
                 "final_qa": _final_qa(answers, ai_judge),

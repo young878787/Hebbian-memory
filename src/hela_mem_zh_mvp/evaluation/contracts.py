@@ -71,6 +71,26 @@ class FixtureQuery(BaseModel):
     must_not_primary: list[str] = Field(default_factory=list)
     expect_answerable: bool
     category: str = Field(min_length=1)
+    suite: Literal["baseline", "architecture_v1"] = "baseline"
+    complexity: Literal["basic", "intermediate", "advanced", "adversarial"] = "basic"
+    architecture_targets: list[
+        Literal[
+            "direct_recall",
+            "alias_resolution",
+            "association_growth",
+            "adaptive_forgetting",
+            "graph_projection",
+            "multi_hop_activation",
+            "temporal_reasoning",
+            "state_resolution",
+            "contradiction_safety",
+            "provenance",
+            "noise_resistance",
+            "consolidation",
+            "abstention",
+        ]
+    ] = Field(default_factory=list)
+    required_hops: int = Field(default=0, ge=0, le=3)
 
     @field_validator("must_include", "nice_to_have", "must_not_primary")
     @classmethod
@@ -78,3 +98,18 @@ class FixtureQuery(BaseModel):
         if len(value) != len(set(value)):
             raise ValueError("oracle IDs must be unique")
         return value
+
+    @field_validator("architecture_targets")
+    @classmethod
+    def unique_architecture_targets(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("architecture_targets must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def architecture_suite_has_explicit_targets(self) -> FixtureQuery:
+        if self.suite == "architecture_v1" and not self.architecture_targets:
+            raise ValueError("architecture_v1 queries require architecture_targets")
+        if self.required_hops >= 2 and "multi_hop_activation" not in self.architecture_targets:
+            raise ValueError("multi-hop queries must target multi_hop_activation")
+        return self

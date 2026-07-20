@@ -51,6 +51,10 @@ def _evaluate_mode(
                 "must_not_primary": fixture_query.must_not_primary,
                 "expect_answerable": fixture_query.expect_answerable,
                 "category": fixture_query.category,
+                "suite": fixture_query.suite,
+                "complexity": fixture_query.complexity,
+                "architecture_targets": fixture_query.architecture_targets,
+                "required_hops": fixture_query.required_hops,
                 "must_include_hit": set(fixture_query.must_include) <= set(selected),
                 "result": result.as_dict(),
                 "manual_scores": {
@@ -88,10 +92,43 @@ def evaluate(
             ],
         },
         "quality_gate": {"status": "pending_manual_scoring"},
+        "coverage": {
+            "query_count": len(bundle.queries),
+            "by_suite": {
+                suite: sum(query.suite == suite for query in bundle.queries)
+                for suite in ("baseline", "architecture_v1")
+            },
+            "by_complexity": {
+                complexity: sum(query.complexity == complexity for query in bundle.queries)
+                for complexity in ("basic", "intermediate", "advanced", "adversarial")
+            },
+            "by_architecture_target": {
+                target: sum(target in query.architecture_targets for query in bundle.queries)
+                for target in sorted(
+                    {target for query in bundle.queries for target in query.architecture_targets}
+                )
+            },
+            "multi_hop_queries": sum(query.required_hops >= 2 for query in bundle.queries),
+        },
         "embedding_only_must_include_hits": sum(
             record["must_include_hit"] for record in embedding_only
         ),
         "hebbian_must_include_hits": sum(record["must_include_hit"] for record in hebbian),
+        "must_include_hits_by_complexity": {
+            complexity: {
+                "embedding_only": sum(
+                    record["must_include_hit"]
+                    for record in embedding_only
+                    if record["complexity"] == complexity
+                ),
+                "hebbian": sum(
+                    record["must_include_hit"]
+                    for record in hebbian
+                    if record["complexity"] == complexity
+                ),
+            }
+            for complexity in ("basic", "intermediate", "advanced", "adversarial")
+        },
     }
     return EvaluationReport(embedding_only, hebbian, summary)
 
