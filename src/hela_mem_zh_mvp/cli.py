@@ -8,24 +8,23 @@ import os
 import sys
 from pathlib import Path
 
-from sqlalchemy import select
-
 from .config import load_config
 from .db import create_db_engine, session_factory, verify_database_target
-from .embedding import EmbeddingClient
-from .fixtures import load_fixture_bundle
-from .live_evaluation import run_live_resolver_evaluation
-from .memory_store import get_namespace
-from .models import MemoryCandidate, MemoryResolutionDecision
-from .pipeline import ask, evaluate, ingest
-from .provider import GoogleProvider
-from .settings import get_settings
-from .single_evaluation import (
+from .evaluation.fixtures import load_fixture_bundle
+from .evaluation.live_resolver import run_live_resolver_evaluation
+from .evaluation.single_e2e import (
     DEFAULT_INPUT_PATH,
     DEFAULT_QUERY_ID,
     DEFAULT_QUERY_LIMIT,
     run_single_e2e_evaluation,
 )
+from .evaluation.standard import evaluate
+from .ingestion.workflow import ingest
+from .persistence.resolution_reports import resolution_report
+from .providers.embedding import EmbeddingClient
+from .providers.google import GoogleProvider
+from .retrieval.workflow import ask
+from .settings import get_settings
 
 
 def _print_json(value: object) -> None:
@@ -174,29 +173,7 @@ def main(argv: list[str] | None = None) -> int:
                     "live resolution apply is disabled; review resolution-report first"
                 )
             with _database_session(require_google=False) as session:
-                namespace = get_namespace(session, args.namespace, create=False)
-                candidates = session.scalars(
-                    select(MemoryCandidate).where(MemoryCandidate.namespace_id == namespace.id)
-                ).all()
-                decisions = session.scalars(
-                    select(MemoryResolutionDecision).where(
-                        MemoryResolutionDecision.namespace_id == namespace.id
-                    )
-                ).all()
-                _print_json(
-                    {
-                        "namespace": args.namespace,
-                        "candidate_statuses": {
-                            status: sum(item.status == status for item in candidates)
-                            for status in ("pending", "resolving", "resolved", "deferred", "failed")
-                        },
-                        "decisions": [
-                            {"action": item.action, "validation_status": item.validation_status}
-                            for item in decisions
-                        ],
-                        "apply": False,
-                    }
-                )
+                _print_json(resolution_report(session, args.namespace))
         return 0
     except ValueError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)

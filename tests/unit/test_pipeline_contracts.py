@@ -2,9 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from hela_mem_zh_mvp.extractor import ExtractionError, extract_messages
-from hela_mem_zh_mvp.ingestion import IngestionError, load_input_messages
-from hela_mem_zh_mvp.schemas import AnswerResult, SourceMessage
+from hela_mem_zh_mvp.ingestion.contracts import SourceMessage
+from hela_mem_zh_mvp.ingestion.extractor import ExtractionError, extract_messages
+from hela_mem_zh_mvp.ingestion.input import IngestionError, load_input_messages
+from hela_mem_zh_mvp.retrieval.contracts import AnswerResult
 
 
 class StaticProvider:

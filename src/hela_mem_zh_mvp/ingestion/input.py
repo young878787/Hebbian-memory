@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from .schemas import SourceMessage
+from .contracts import SourceMessage
 
 INPUT_PATH = Path("data/input/conversations.jsonl")
 

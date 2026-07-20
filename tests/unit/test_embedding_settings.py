@@ -1,4 +1,4 @@
-from hela_mem_zh_mvp.embedding import EmbeddingClient
+from hela_mem_zh_mvp.providers.embedding import EmbeddingClient
 from hela_mem_zh_mvp.settings import Settings
 
 

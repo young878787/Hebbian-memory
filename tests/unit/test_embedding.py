@@ -2,7 +2,11 @@ import math
 
 import pytest
 
-from hela_mem_zh_mvp.embedding import EMBEDDING_DIMENSION, EmbeddingError, normalize_embedding
+from hela_mem_zh_mvp.providers.embedding import (
+    EMBEDDING_DIMENSION,
+    EmbeddingError,
+    normalize_embedding,
+)
 
 
 def test_normalize_embedding_returns_unit_vector() -> None:

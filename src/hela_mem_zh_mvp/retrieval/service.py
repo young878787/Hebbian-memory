@@ -4,67 +4,17 @@ from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import dataclass, field
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import AppConfig
-from .embedding import EmbeddingClient
-from .models import Memory, MemoryEdge, RetrievalItem, RetrievalRun
-from .schemas import EdgeType, QueryScope, RetrievalMode, RunMode
+from ..config import AppConfig
+from ..persistence.models import Memory, MemoryEdge
+from ..persistence.retrieval_runs import create_retrieval_items, create_retrieval_run
+from ..providers.embedding import EmbeddingClient
+from .contracts import QueryScope, RankedMemory, RetrievalMode, RetrievalResult, RunMode
 
-
-@dataclass
-class RankedMemory:
-    memory: Memory
-    semantic_score: float
-    candidate_rank: int = 0
-    hebbian_score: float = 0.0
-    status_adjustment: float = 0.0
-    final_score: float = 0.0
-    source: str = "seed"
-    activation_path: list[dict[str, Any]] = field(default_factory=list)
-    selected: bool = False
-    final_rank: int | None = None
-
-    @property
-    def external_id(self) -> str:
-        return self.memory.external_id
-
-
-@dataclass(frozen=True)
-class RetrievalResult:
-    run_id: uuid.UUID
-    mode: RetrievalMode
-    scope: QueryScope
-    latency_ms: float
-    items: list[RankedMemory]
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "run_id": str(self.run_id),
-            "mode": self.mode.value,
-            "scope": self.scope.value,
-            "latency_ms": self.latency_ms,
-            "items": [
-                {
-                    "external_id": item.external_id,
-                    "content": item.memory.content,
-                    "status": item.memory.status,
-                    "semantic_score": item.semantic_score,
-                    "hebbian_score": item.hebbian_score,
-                    "status_adjustment": item.status_adjustment,
-                    "final_score": item.final_score,
-                    "source": item.source,
-                    "selected": item.selected,
-                    "final_rank": item.final_rank,
-                    "activation_path": item.activation_path,
-                }
-                for item in self.items
-            ],
-        }
+CONTRADICTS_EDGE_TYPE = "contradicts"
 
 
 def _tie_key(item: RankedMemory) -> tuple[float, float, float, str]:
@@ -130,7 +80,7 @@ class Retriever:
                 item = candidates.setdefault(
                     target.id, RankedMemory(memory=target, semantic_score=0.0, source="hebbian")
                 )
-                if edge.edge_type == EdgeType.CONTRADICTS.value:
+                if edge.edge_type == CONTRADICTS_EDGE_TYPE:
                     item.activation_path.append(
                         {
                             "source_external_id": seed.external_id,
@@ -180,7 +130,9 @@ class Retriever:
                     item
                     for item in items
                     if item.memory.id not in seed_ids
-                    and any(path["edge_type"] == EdgeType.CONTRADICTS.value for path in item.activation_path)
+                    and any(
+                        path["edge_type"] == CONTRADICTS_EDGE_TYPE for path in item.activation_path
+                    )
                 ),
                 key=_tie_key,
             )
@@ -225,33 +177,19 @@ class Retriever:
             item.candidate_rank = rank
         self._mark_selected(items, seeds, mode, self.config.retrieval.final_top_k)
         latency_ms = (time.perf_counter() - started) * 1000
-        run = RetrievalRun(
-            namespace_id=namespace_id,
-            query=query,
-            retrieval_mode=mode.value,
-            run_mode=run_mode.value,
-            query_scope=scope.value,
-            total_latency_ms=latency_ms,
-            metadata_={"config": self.config.snapshot()},
+        run = create_retrieval_run(
+            self.session,
+            namespace_id,
+            query,
+            mode,
+            scope,
+            run_mode,
+            latency_ms,
+            self.config.snapshot(),
         )
-        self.session.add(run)
-        self.session.flush()
-        for item in items:
-            self.session.add(
-                RetrievalItem(
-                    namespace_id=namespace_id,
-                    run_id=run.id,
-                    memory_id=item.memory.id,
-                    candidate_rank=item.candidate_rank,
-                    final_rank=item.final_rank,
-                    selected=item.selected,
-                    semantic_score=item.semantic_score,
-                    hebbian_score=item.hebbian_score,
-                    status_adjustment=item.status_adjustment,
-                    final_score=item.final_score,
-                    retrieval_source=item.source,
-                    activation_path=item.activation_path,
-                )
-            )
+        create_retrieval_items(self.session, namespace_id, run.id, items)
         self.session.commit()
         return RetrievalResult(run.id, mode, scope, latency_ms, ordered_candidates)
+
+
+__all__ = ["Retriever"]

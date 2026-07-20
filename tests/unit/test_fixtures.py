@@ -1,4 +1,4 @@
-from hela_mem_zh_mvp.fixtures import load_fixture_bundle
+from hela_mem_zh_mvp.evaluation.fixtures import load_fixture_bundle
 
 
 def test_fixture_bundle_matches_mvp_contract() -> None:

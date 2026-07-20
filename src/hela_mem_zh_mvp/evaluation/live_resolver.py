@@ -10,11 +10,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .embedding import EmbeddingClient
-from .memory_store import get_namespace, reset_namespace
-from .models import Memory, MemoryCandidate, MemoryEdge, MemoryResolutionDecision
-from .pipeline import ingest
-from .provider import StructuredProvider
+from ..ingestion.workflow import ingest
+from ..persistence.models import Memory, MemoryCandidate, MemoryEdge, MemoryResolutionDecision
+from ..persistence.namespaces import get_namespace, reset_namespace
+from ..providers.base import StructuredProvider
+from ..providers.embedding import EmbeddingClient
 
 RESULTS_DIRECTORY = Path("results/live_resolver")
 SUPERSEDE_NAMESPACE = "live-supersede-v1"
@@ -40,9 +40,7 @@ def _reset(session: Session, namespace_key: str) -> None:
 
 def _namespace_state(session: Session, namespace_key: str) -> dict[str, Any]:
     namespace = get_namespace(session, namespace_key, create=False)
-    memories = session.scalars(
-        select(Memory).where(Memory.namespace_id == namespace.id)
-    ).all()
+    memories = session.scalars(select(Memory).where(Memory.namespace_id == namespace.id)).all()
     decisions = session.scalars(
         select(MemoryResolutionDecision).where(
             MemoryResolutionDecision.namespace_id == namespace.id

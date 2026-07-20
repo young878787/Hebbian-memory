@@ -9,12 +9,12 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .config import AppConfig
-from .embedding import EmbeddingClient
+from ..config import AppConfig
+from ..persistence.namespaces import get_namespace
+from ..providers.embedding import EmbeddingClient
+from ..retrieval.contracts import RetrievalMode, RunMode
+from ..retrieval.service import Retriever
 from .fixtures import FixtureBundle
-from .memory_store import get_namespace
-from .retriever import Retriever
-from .schemas import RetrievalMode, RunMode
 
 
 @dataclass(frozen=True)

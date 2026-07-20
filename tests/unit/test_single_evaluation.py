@@ -1,8 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from hela_mem_zh_mvp import single_evaluation
 from hela_mem_zh_mvp.cli import build_parser
+from hela_mem_zh_mvp.evaluation import single_e2e as single_evaluation
 
 
 def test_single_e2e_cli_accepts_batch_and_one_case_overrides() -> None:
@@ -54,7 +54,11 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
 
     def fake_purge(*args, **kwargs):  # noqa: ANN002, ANN003
         calls.append("purge")
-        return {"before": {"memories": 2, "edges": 3}, "removed": True, "namespace_exists_after": False}
+        return {
+            "before": {"memories": 2, "edges": 3},
+            "removed": True,
+            "namespace_exists_after": False,
+        }
 
     def fake_ingest(*args, **kwargs):  # noqa: ANN002, ANN003
         calls.append("ingest")
@@ -137,7 +141,17 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
         query_limit=2,
     )
 
-    assert calls == ["purge", "ingest", "resolver", "retrieve", "answer", "retrieve", "answer", "judge", "purge"]
+    assert calls == [
+        "purge",
+        "ingest",
+        "resolver",
+        "retrieve",
+        "answer",
+        "retrieve",
+        "answer",
+        "judge",
+        "purge",
+    ]
     assert summary["status"] == "PASS"
     assert summary["quality_status"] == "PASS"
     assert summary["questions"] == {

@@ -1,37 +1,15 @@
-"""Optional Google provider integration, isolated from retrieval scoring."""
+"""Google Gemini structured-output provider adapter."""
 
 from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
-from typing import Protocol, TypeVar
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel
 
-from .settings import Settings
-
-
-class ProviderError(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True)
-class ProviderProbe:
-    model: str
-    latency_ms: float
-    text: str
-
-
-StructuredModel = TypeVar("StructuredModel", bound=BaseModel)
-
-
-class StructuredProvider(Protocol):
-    def generate_structured(
-        self, prompt: str, response_model: type[StructuredModel]
-    ) -> StructuredModel: ...
+from ..settings import Settings
+from .base import ProviderError, ProviderProbe, StructuredModel
 
 
 def _google_response_schema(value: object) -> object:

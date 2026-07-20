@@ -1,9 +1,12 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import uuid4
 
-from hela_mem_zh_mvp.retriever import RankedMemory, Retriever
-from hela_mem_zh_mvp.schemas import RetrievalMode
+from hela_mem_zh_mvp.config import load_config
+from hela_mem_zh_mvp.retrieval import service as retrieval_service
+from hela_mem_zh_mvp.retrieval.contracts import QueryScope, RankedMemory, RetrievalMode, RunMode
+from hela_mem_zh_mvp.retrieval.service import Retriever
 
 
 def _item(external_id: str, score: float, hebbian: float = 0.0) -> RankedMemory:
@@ -43,3 +46,40 @@ def test_hebbian_selects_contradiction_context_without_positive_bonus() -> None:
     assert contradiction.selected
     assert contradiction.hebbian_score == 0
     assert bonus.selected
+
+
+def test_retrieve_commits_after_persisting_run_trace(monkeypatch) -> None:
+    session = Mock()
+    item = _item("M1", 0.9)
+    run = SimpleNamespace(id=uuid4())
+    events: list[str] = []
+
+    def create_run(*args, **kwargs):
+        events.append("run")
+        return run
+
+    def create_items(*args, **kwargs):
+        assert not session.commit.called
+        events.append("items")
+
+    class StubRetriever(Retriever):
+        def _semantic_candidates(self, namespace_id, query_embedding):
+            return [item]
+
+    monkeypatch.setattr(retrieval_service, "create_retrieval_run", create_run)
+    monkeypatch.setattr(retrieval_service, "create_retrieval_items", create_items)
+    result = StubRetriever(
+        session,
+        load_config(),
+        SimpleNamespace(embed=lambda query: [0.0]),
+    ).retrieve(
+        uuid4(),
+        "測試查詢",
+        RetrievalMode.EMBEDDING_ONLY,
+        QueryScope.GENERAL,
+        RunMode.EVALUATION,
+    )
+
+    assert events == ["run", "items"]
+    session.commit.assert_called_once_with()
+    assert result.run_id == run.id

@@ -1,4 +1,4 @@
-from hela_mem_zh_mvp.models import MemoryEntity
+from hela_mem_zh_mvp.persistence.models import MemoryEntity
 
 
 def test_memory_entity_lookup_uses_its_declared_primary_key() -> None:

@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .provider import StructuredProvider
-from .schemas import AIJudgeSummary
+from ..providers.base import StructuredProvider
+from .contracts import AIJudgeSummary
 
 
 class JudgeError(ValueError):

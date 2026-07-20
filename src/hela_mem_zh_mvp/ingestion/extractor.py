@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from .provider import StructuredProvider
-from .schemas import ExtractionResult, SourceMessage
+from ..providers.base import StructuredProvider
+from .contracts import ExtractionResult, SourceMessage
 
 
 class ExtractionError(ValueError):

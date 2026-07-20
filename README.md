@@ -8,15 +8,16 @@
 Copy-Item .env.example .env
 # 填入 GOOGLE_API_KEY、POSTGRES_PASSWORD 與實際服務設定
 uv sync --group dev
-uv run python -m hela_mem_zh_mvp.cli smoke --component all
+uv run python -m hela_mem_zh_mvp.cli smoke
 uv run alembic upgrade head
-uv run python -m hela_mem_zh_mvp.cli seed --fixtures data/fixtures
-uv run python -m hela_mem_zh_mvp.cli query --mode hebbian --scope historical "我之前是不是說過想買顯卡？"
-uv run python -m hela_mem_zh_mvp.cli evaluate --run-mode evaluation --output results
+$env:HEBBIAN_NAMESPACE = "my-research-namespace"
+uv run python -m hela_mem_zh_mvp.cli ingest
+uv run python -m hela_mem_zh_mvp.cli ask "我之前是不是說過想買顯卡？"
+uv run python -m hela_mem_zh_mvp.cli evaluate
 uv run pytest
 ```
 
-`smoke --component postgres|embedding` 是 retrieval 的 hard gate；Google 只影響 provider smoke。所有執行入口共用 `.env` 的 `Settings`，不接受 `DATABASE_URL`。
+`smoke` 會驗證 PostgreSQL、embedding 與 provider；所有執行入口共用 `.env` 的 `Settings`，不接受 `DATABASE_URL`。`ask --learn` 只有通過 citation contract 時才強化 co-retrieval edge。
 
 ## 完整執行入口
 
@@ -35,5 +36,5 @@ uv run python main.py run --input data/input/conversations.jsonl --query "使用
 
 - `.env` 不會提交，也不會被 log 輸出。
 - migration 只接受 `hebbian_memory_mvp` 為目標資料庫。
-- `evaluate --run-mode evaluation` 只寫 trace，絕不調整 edge。
+- `evaluate` 只寫 retrieval trace，絕不調整 edge。
 - `sample/HeLa-Mem` 為唯讀研究參考，runtime 不 import 它。

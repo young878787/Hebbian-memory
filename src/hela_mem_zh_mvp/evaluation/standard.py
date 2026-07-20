@@ -1,4 +1,4 @@
-"""Application workflows for ingest, ask, and the fixed evaluation artifacts."""
+"""Standard fixture evaluation workflow with stable artifact contracts."""
 
 from __future__ import annotations
 
@@ -10,86 +10,18 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .answerer import answer_query
-from .config import AppConfig, load_config
-from .edges import reinforce_co_retrieval
-from .embedding import EmbeddingClient
-from .extractor import extract_messages
+from ..config import AppConfig
+from ..persistence.models import MemoryEdge
+from ..persistence.namespaces import FIXTURE_NAMESPACE, get_namespace, reset_test_namespace
+from ..providers.base import StructuredProvider
+from ..providers.embedding import EmbeddingClient
+from ..retrieval.answerer import answer_query
+from ..retrieval.contracts import AnswerResult, RetrievalMode, RunMode
+from ..retrieval.service import Retriever
 from .fixtures import load_fixture_bundle, seed_fixtures
-from .ingestion import INPUT_PATH, load_input_messages
 from .judge import judge_answers
-from .memory_store import FIXTURE_NAMESPACE, get_namespace, reset_test_namespace, write_ingestion
-from .models import MemoryEdge
-from .provider import StructuredProvider
-from .retriever import Retriever
-from .schemas import AnswerResult, QueryScope, RetrievalMode, RunMode
 
 RESULTS_DIRECTORY = Path("results/pipeline")
-
-
-class PipelineError(ValueError):
-    pass
-
-
-def ingest(
-    session: Session,
-    namespace_key: str,
-    provider: StructuredProvider,
-    embeddings: EmbeddingClient,
-    *,
-    input_path: Path = INPUT_PATH,
-    extractor_model: str,
-) -> dict[str, int]:
-    messages = load_input_messages(input_path)
-    extraction = extract_messages(provider, messages)  # no DB transaction while calling AI
-    with session.begin():
-        return write_ingestion(
-            session,
-            namespace_key,
-            messages,
-            extraction,
-            embeddings,
-            extractor_model=extractor_model,
-            resolution=load_config().resolution,
-        )
-
-
-def ask(
-    session: Session,
-    namespace_key: str,
-    query: str,
-    provider: StructuredProvider,
-    embeddings: EmbeddingClient,
-    config: AppConfig,
-    *,
-    learn: bool = False,
-) -> dict[str, Any]:
-    namespace = get_namespace(session, namespace_key, create=False)
-    result = Retriever(session, config, embeddings).retrieve(
-        namespace.id,
-        query,
-        RetrievalMode.HEBBIAN,
-        QueryScope.GENERAL,
-        RunMode.LEARNING if learn else RunMode.EVALUATION,
-    )
-    answer = answer_query(provider, query, result)
-    if learn and answer.answerable:
-        selected = {item.external_id: item.memory.id for item in result.items if item.selected}
-        cited_ids = [selected[citation] for citation in answer.citations]
-        reinforce_co_retrieval(
-            session,
-            namespace.id,
-            cited_ids,
-            config.learning,
-            metadata={
-                "origin": "co_retrieval",
-                "retrieval_run_id": str(result.run_id),
-                "answer_citations": answer.citations,
-                "learning_gate_reason": "explicit ask --learn and citation contract passed",
-            },
-        )
-        session.commit()
-    return {"retrieval": result.as_dict(), "answer": answer.model_dump()}
 
 
 def _write_artifact(name: str, payload: Any) -> None:

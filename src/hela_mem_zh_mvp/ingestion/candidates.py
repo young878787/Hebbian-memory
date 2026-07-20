@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Memory, MemoryEntity
+from ..persistence.models import Memory, MemoryEntity
 
 
 @dataclass(frozen=True)

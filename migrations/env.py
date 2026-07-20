@@ -3,7 +3,7 @@ from __future__ import annotations
 from alembic import context
 from sqlalchemy import engine_from_config, pool, text
 
-from hela_mem_zh_mvp.models import Base
+from hela_mem_zh_mvp.persistence.models import Base
 from hela_mem_zh_mvp.settings import EXPECTED_DATABASE, get_settings
 
 config = context.config

@@ -9,10 +9,10 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .edges import edge_weight, upsert_edge
-from .embedding import EmbeddingClient
-from .models import Memory, MemoryNamespace
-from .schemas import FixtureEdge, FixtureMemory, FixtureQuery
+from ..persistence.edges import edge_weight, upsert_edge
+from ..persistence.models import Memory, MemoryNamespace
+from ..providers.embedding import EmbeddingClient
+from .contracts import FixtureEdge, FixtureMemory, FixtureQuery
 
 
 class FixtureError(ValueError):

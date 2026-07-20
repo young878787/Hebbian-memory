@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from openai import OpenAI
 
-from .settings import Settings
+from ..settings import Settings
 
 EMBEDDING_DIMENSION = 2560
 

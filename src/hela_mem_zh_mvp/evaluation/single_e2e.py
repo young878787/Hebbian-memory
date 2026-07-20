@@ -12,18 +12,25 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .answerer import answer_query
-from .config import AppConfig
-from .embedding import EmbeddingClient
+from ..config import AppConfig
+from ..ingestion.input import load_input_messages
+from ..ingestion.workflow import ingest
+from ..persistence.models import (
+    Memory,
+    MemoryCandidate,
+    MemoryEdge,
+    MemoryNamespace,
+    MemoryResolutionDecision,
+)
+from ..persistence.namespaces import get_namespace, purge_namespace
+from ..providers.base import StructuredProvider
+from ..providers.embedding import EmbeddingClient
+from ..retrieval.answerer import answer_query
+from ..retrieval.contracts import QueryScope, RetrievalMode, RunMode
+from ..retrieval.service import Retriever
+from .contracts import FixtureQuery
 from .fixtures import load_fixture_bundle
-from .ingestion import load_input_messages
 from .judge import judge_answers
-from .memory_store import get_namespace, purge_namespace
-from .models import Memory, MemoryCandidate, MemoryEdge, MemoryNamespace, MemoryResolutionDecision
-from .pipeline import ingest
-from .provider import StructuredProvider
-from .retriever import Retriever
-from .schemas import FixtureQuery, QueryScope, RetrievalMode, RunMode
 
 RESULTS_DIRECTORY = Path("results/pipeline")
 SUMMARY_PATH = Path("results/summary.json")
@@ -61,9 +68,9 @@ def _namespace_counts(session: Session, namespace_key: str) -> dict[str, int]:
         )
         or 0,
         "edges": session.scalar(
-            select(func.count()).select_from(MemoryEdge).where(
-                MemoryEdge.namespace_id == namespace.id
-            )
+            select(func.count())
+            .select_from(MemoryEdge)
+            .where(MemoryEdge.namespace_id == namespace.id)
         )
         or 0,
     }
@@ -142,9 +149,7 @@ def _judge_record(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _final_qa(
-    answers: list[dict[str, Any]], ai_judge: dict[str, Any]
-) -> list[dict[str, Any]]:
+def _final_qa(answers: list[dict[str, Any]], ai_judge: dict[str, Any]) -> list[dict[str, Any]]:
     verdicts = {case["query_id"]: case for case in ai_judge.get("cases", [])}
     return [
         {
@@ -259,8 +264,7 @@ def run_single_e2e_evaluation(
             "all_queries_completed": len(records) == len(queries),
             "all_answers_returned": all(record["answer"] is not None for record in records),
             "all_citations_selected": all(
-                record["deterministic_checks"]["answer_citations_selected"]
-                for record in records
+                record["deterministic_checks"]["answer_citations_selected"] for record in records
             ),
             "ai_judge_contract": ai_judge["status"] == "PASS",
         }
@@ -282,7 +286,9 @@ def run_single_e2e_evaluation(
                     "requested": len(queries),
                     "completed": len(records),
                     "answers_returned": sum(record["answer"] is not None for record in records),
-                    "provider_errors": sum(record["answer_error"] is not None for record in records),
+                    "provider_errors": sum(
+                        record["answer_error"] is not None for record in records
+                    ),
                 },
                 "ai_judge": {**ai_judge, "verdict_counts": verdict_counts},
                 "final_qa": _final_qa(answers, ai_judge),

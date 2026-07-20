@@ -8,9 +8,9 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from .config import LearningConfig
+from ..config import LearningConfig
+from ..ingestion.contracts import EdgeType
 from .models import MemoryEdge
-from .schemas import EdgeType
 
 SYMMETRIC_EDGE_TYPES = {EdgeType.SEMANTIC, EdgeType.CO_RETRIEVAL, EdgeType.CONTRADICTS}
 DEFAULT_LOGICAL_WEIGHT = {

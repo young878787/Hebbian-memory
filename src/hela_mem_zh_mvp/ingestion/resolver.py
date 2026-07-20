@@ -11,11 +11,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .candidate_search import ScopedCandidate
-from .config import ResolutionConfig
-from .models import Memory
+from ..config import ResolutionConfig
+from ..persistence.models import Memory
+from .candidates import ScopedCandidate
+from .contracts import EffectiveOrder, ExtractedMemory, ResolutionAction, ResolutionDecision
 from .normalization import normalize_lookup
-from .schemas import EffectiveOrder, ExtractedMemory, ResolutionAction, ResolutionDecision
 
 
 def canonical_key(content: str, memory_type: str) -> str:
@@ -77,13 +77,17 @@ def resolve_memory(
         select(Memory).where(Memory.namespace_id == namespace_id, Memory.canonical_key == key)
     )
     if existing:
-        return Resolution(ResolutionAction.MERGE_PROVENANCE, existing, reason="canonical key exact match")
+        return Resolution(
+            ResolutionAction.MERGE_PROVENANCE, existing, reason="canonical key exact match"
+        )
     scoped = tuple(candidates or ())
     if not scoped:
         return Resolution(ResolutionAction.CREATE, reason="no safe scoped candidates")
     # Semantic similarity alone never selects a state transition.  It only
     # marks the candidate for an optional resolver pass.
-    return Resolution(ResolutionAction.DEFER, candidates=scoped, reason="requires semantic comparison")
+    return Resolution(
+        ResolutionAction.DEFER, candidates=scoped, reason="requires semantic comparison"
+    )
 
 
 def resolution_prompt(
@@ -114,7 +118,11 @@ def validate_ai_decision(
         return "target outside supplied snapshot"
     if decision.confidence < config.ai_decision_confidence_min:
         return "confidence below threshold"
-    if any(quote not in candidate_evidence and not any(quote in target.content for target in target_by_ref.values()) for quote in decision.evidence_quotes):
+    if any(
+        quote not in candidate_evidence
+        and not any(quote in target.content for target in target_by_ref.values())
+        for quote in decision.evidence_quotes
+    ):
         return "evidence quote absent from supplied evidence"
     if decision.action is ResolutionAction.SUPERSEDE:
         if decision.effective_order is EffectiveOrder.UNKNOWN:

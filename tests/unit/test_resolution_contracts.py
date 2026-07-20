@@ -3,11 +3,15 @@ from types import SimpleNamespace
 import pytest
 
 from hela_mem_zh_mvp.config import ResolutionConfig
-from hela_mem_zh_mvp.memory_store import _resolution_topic_key
-from hela_mem_zh_mvp.models import Entity
-from hela_mem_zh_mvp.normalization import normalize_lookup, state_key, topic_key
-from hela_mem_zh_mvp.resolver import validate_ai_decision
-from hela_mem_zh_mvp.schemas import EffectiveOrder, ResolutionAction, ResolutionDecision
+from hela_mem_zh_mvp.ingestion.contracts import (
+    EffectiveOrder,
+    ResolutionAction,
+    ResolutionDecision,
+)
+from hela_mem_zh_mvp.ingestion.normalization import normalize_lookup, state_key, topic_key
+from hela_mem_zh_mvp.ingestion.resolver import validate_ai_decision
+from hela_mem_zh_mvp.ingestion.service import _resolution_topic_key
+from hela_mem_zh_mvp.persistence.models import Entity
 
 
 def _config() -> ResolutionConfig:

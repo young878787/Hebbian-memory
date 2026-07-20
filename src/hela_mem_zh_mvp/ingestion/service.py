@@ -8,29 +8,33 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .candidate_search import find_scoped_candidates
-from .config import ResolutionConfig
-from .edges import upsert_edge
-from .embedding import EmbeddingClient
-from .ingestion import content_hash
-from .models import (
+from ..config import ResolutionConfig
+from ..persistence.edges import upsert_edge
+from ..persistence.models import (
     Entity,
     EntityAlias,
     IngestionRun,
     Memory,
     MemoryCandidate,
-    MemoryEdge,
     MemoryEntity,
-    MemoryNamespace,
     MemoryResolutionDecision,
-    RetrievalItem,
-    RetrievalRun,
 )
-from .models import (
+from ..persistence.models import (
     SourceMessage as StoredSourceMessage,
 )
+from ..persistence.namespaces import get_namespace
+from ..persistence.resolutions import ResolutionApplyError, apply_resolution
+from ..providers.embedding import EmbeddingClient
+from .candidates import find_scoped_candidates
+from .contracts import (
+    EdgeType,
+    ExtractionResult,
+    ResolutionAction,
+    ResolutionDecision,
+    SourceMessage,
+)
+from .input import content_hash
 from .normalization import NORMALIZER_VERSION, TOPIC_VERSION, normalize_lookup, state_key, topic_key
-from .resolution_store import ResolutionApplyError, apply_resolution
 from .resolver import (
     Resolution,
     candidate_key,
@@ -39,32 +43,10 @@ from .resolver import (
     resolve_memory,
     snapshot_hash,
 )
-from .schemas import (
-    EdgeType,
-    ExtractionResult,
-    ResolutionAction,
-    ResolutionDecision,
-    SourceMessage,
-)
-
-FIXTURE_NAMESPACE = "fixture-pipeline-v1"
 
 
 class StoreError(ValueError):
     pass
-
-
-def get_namespace(session: Session, namespace_key: str, *, create: bool = True) -> MemoryNamespace:
-    namespace = session.scalar(
-        select(MemoryNamespace).where(MemoryNamespace.namespace_key == namespace_key)
-    )
-    if namespace is None:
-        if not create:
-            raise StoreError(f"unknown namespace {namespace_key!r}")
-        namespace = MemoryNamespace(namespace_key=namespace_key, display_name=namespace_key)
-        session.add(namespace)
-        session.flush()
-    return namespace
 
 
 def _merge_unique(values: list[str] | None, additions: list[str]) -> list[str]:
@@ -344,7 +326,12 @@ def write_ingestion(
                 ),
                 source_message_ids=candidate.evidence_message_ids,
                 embedding=embedding,
-                metadata_={"origin": "extractor", "resolution_scope": "entity_topic" if entity_ids and normalized_topic else "no_entity_or_topic"},
+                metadata_={
+                    "origin": "extractor",
+                    "resolution_scope": "entity_topic"
+                    if entity_ids and normalized_topic
+                    else "no_entity_or_topic",
+                },
             )
             session.add(memory)
             session.flush()
@@ -381,7 +368,10 @@ def write_ingestion(
                         mention_role=(
                             "subject"
                             if candidate.primary_entity_candidate_id == entity_id
-                            or (candidate.primary_entity_candidate_id is None and entity_id == candidate.entity_candidate_ids[0])
+                            or (
+                                candidate.primary_entity_candidate_id is None
+                                and entity_id == candidate.entity_candidate_ids[0]
+                            )
                             else "mentioned"
                         ),
                         confidence=candidate.confidence,
@@ -478,7 +468,10 @@ def write_ingestion(
             entity_ids=entity_ids,
             limit=resolution.candidate_limit,
         ):
-            if neighbor.memory.id != memory.id and neighbor.similarity >= resolution.ambiguous_similarity_min:
+            if (
+                neighbor.memory.id != memory.id
+                and neighbor.similarity >= resolution.ambiguous_similarity_min
+            ):
                 upsert_edge(
                     session,
                     namespace.id,
@@ -517,51 +510,3 @@ def write_ingestion(
         counts["ignored"],
     )
     return {"messages": len(messages), **counts}
-
-
-def reset_namespace(session: Session, namespace_key: str) -> None:
-    """Delete one explicitly named namespace; caller owns the transaction."""
-    namespace = get_namespace(session, namespace_key, create=False)
-    namespace_id = namespace.id
-    run_ids = select(IngestionRun.id).where(IngestionRun.namespace_id == namespace_id)
-    retrieval_ids = select(RetrievalRun.id).where(RetrievalRun.namespace_id == namespace_id)
-    session.query(RetrievalItem).filter(RetrievalItem.run_id.in_(retrieval_ids)).delete(
-        synchronize_session=False
-    )
-    session.query(RetrievalRun).filter_by(namespace_id=namespace_id).delete(
-        synchronize_session=False
-    )
-    session.query(MemoryEdge).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
-    candidate_ids = select(MemoryCandidate.id).where(MemoryCandidate.namespace_id == namespace_id)
-    session.query(MemoryResolutionDecision).filter(
-        MemoryResolutionDecision.candidate_id.in_(candidate_ids)
-    ).delete(synchronize_session=False)
-    session.query(MemoryCandidate).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
-    session.query(MemoryEntity).filter_by(namespace_id=namespace_id).delete(
-        synchronize_session=False
-    )
-    session.query(Memory).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
-    session.query(Entity).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
-    session.query(StoredSourceMessage).filter_by(namespace_id=namespace_id).delete(
-        synchronize_session=False
-    )
-    session.query(IngestionRun).filter(IngestionRun.id.in_(run_ids)).delete(
-        synchronize_session=False
-    )
-
-
-def reset_test_namespace(session: Session) -> None:
-    """The evaluation reset is deliberately fixed to its reserved namespace."""
-    reset_namespace(session, FIXTURE_NAMESPACE)
-
-
-def purge_namespace(session: Session, namespace_key: str) -> bool:
-    """Delete an explicitly named namespace and its data; caller owns the transaction."""
-    try:
-        namespace = get_namespace(session, namespace_key, create=False)
-    except ValueError:
-        return False
-    reset_namespace(session, namespace_key)
-    session.delete(namespace)
-    session.flush()
-    return True

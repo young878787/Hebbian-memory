@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 
-from .provider import StructuredProvider
-from .retriever import RetrievalResult
-from .schemas import AnswerResult
+from ..providers.base import StructuredProvider
+from .contracts import AnswerResult, RetrievalResult
 
 
 class AnswerError(ValueError):
@@ -37,3 +36,6 @@ def answer_query(provider: StructuredProvider, query: str, result: RetrievalResu
     if not set(answer.citations) <= allowed:
         raise AnswerError("answer cites a memory that was not selected")
     return answer
+
+
+__all__ = ["AnswerError", "answer_query"]

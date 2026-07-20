@@ -36,10 +36,18 @@ def topic_key(topic_raw: str | None) -> str | None:
 
 
 def state_key(
-    entity_id: object | None, memory_type: str, normalized_topic: str | None, attribute_key: str | None
+    entity_id: object | None,
+    memory_type: str,
+    normalized_topic: str | None,
+    attribute_key: str | None,
 ) -> str | None:
     """Only explicit state slots receive uniqueness/state-transition semantics."""
-    if entity_id is None or normalized_topic is None or not attribute_key or attribute_key == "unknown":
+    if (
+        entity_id is None
+        or normalized_topic is None
+        or not attribute_key
+        or attribute_key == "unknown"
+    ):
         return None
     raw = f"{entity_id}:{memory_type}:{normalized_topic}:{normalize_lookup(attribute_key)}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:48]
