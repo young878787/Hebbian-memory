@@ -18,8 +18,9 @@ class RetrievalConfig(BaseModel):
     semantic_top_k: int = Field(ge=1)
     similarity_threshold: float = Field(ge=0, le=1)
     activation_alpha: float = Field(ge=0)
-    spread_depth: int = Field(ge=1, le=1)
+    spread_depth: int = Field(ge=1, le=3)
     max_neighbors_per_seed: int = Field(ge=1)
+    path_budget: int = Field(default=40, ge=1)
     tie_score_tolerance: float = Field(gt=0)
 
     @model_validator(mode="after")

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import ResolutionConfig
+from ..persistence.claims import ensure_claim, sync_claim_view
 from ..persistence.edges import upsert_edge
 from ..persistence.models import (
     Entity,
@@ -19,10 +20,9 @@ from ..persistence.models import (
     MemoryEntity,
     MemoryResolutionDecision,
 )
-from ..persistence.models import (
-    SourceMessage as StoredSourceMessage,
-)
+from ..persistence.models import SourceMessage as StoredSourceMessage
 from ..persistence.namespaces import get_namespace
+from ..persistence.relations import append_relation_evidence
 from ..persistence.resolutions import ResolutionApplyError, apply_resolution
 from ..providers.embedding import EmbeddingClient
 from .candidates import find_scoped_candidates
@@ -192,6 +192,7 @@ def write_ingestion(
         for item in extraction.entities
     }
     memory_by_candidate: dict[str, Memory] = {}
+    claim_by_candidate = {}
     staged_by_candidate: dict[str, MemoryCandidate] = {}
     explicit_state_relation_ids = {
         candidate_id
@@ -357,6 +358,15 @@ def write_ingestion(
             )
         )
         memory_by_candidate[candidate.candidate_id] = memory
+        # The legacy Memory remains the retrieval view during migration, but
+        # every resolved extraction also receives immutable claim evidence.
+        claim_by_candidate[candidate.candidate_id] = ensure_claim(
+            session,
+            memory,
+            evidence_by_message={message_id: candidate.evidence for message_id in candidate.evidence_message_ids},
+            extractor_model=extractor_model,
+            schema_version=extraction.schema_version,
+        )
         for entity_id in candidate.entity_candidate_ids:
             entity = entity_by_candidate[entity_id]
             if session.get(MemoryEntity, (memory.id, entity.id)) is None:
@@ -389,6 +399,8 @@ def write_ingestion(
             memory_by_candidate[relation.source_candidate_id],
             memory_by_candidate[relation.target_candidate_id],
         )
+        source_claim = claim_by_candidate[relation.source_candidate_id]
+        target_claim = claim_by_candidate[relation.target_candidate_id]
         if relation.edge_type in {EdgeType.SUPERSEDES, EdgeType.CONTRADICTS}:
             order = reliable_order(
                 source.occurred_at,
@@ -443,7 +455,29 @@ def write_ingestion(
                 counts["superseded"] += 1
             else:
                 counts["contradicted"] += 1
+            append_relation_evidence(
+                session,
+                namespace_id=namespace.id,
+                source_claim=source_claim,
+                target_claim=target_claim,
+                relation_type=relation.edge_type.value,
+                origin="extractor",
+                evidence_refs=[relation.evidence],
+            )
+            sync_claim_view(session, target)
+            session.flush()
+            sync_claim_view(session, source)
             continue
+        if relation.edge_type.value in {"supports", "temporal"}:
+            append_relation_evidence(
+                session,
+                namespace_id=namespace.id,
+                source_claim=source_claim,
+                target_claim=target_claim,
+                relation_type=relation.edge_type.value,
+                origin="extractor",
+                evidence_refs=[relation.evidence],
+            )
         upsert_edge(
             session,
             namespace.id,

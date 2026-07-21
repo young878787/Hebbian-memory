@@ -9,9 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import AppConfig
-from ..persistence.models import Memory, MemoryEdge
+from ..persistence.models import AssociationStat, Memory, MemoryEdge
 from ..persistence.retrieval_runs import create_retrieval_items, create_retrieval_run
 from ..providers.embedding import EmbeddingClient
+from .activation import ActivationEdge, activate
 from .contracts import QueryScope, RankedMemory, RetrievalMode, RetrievalResult, RunMode
 
 CONTRADICTS_EDGE_TYPE = "contradicts"
@@ -51,63 +52,73 @@ class Retriever:
         namespace_id: uuid.UUID,
         seeds: list[RankedMemory],
         candidates: dict[uuid.UUID, RankedMemory],
+        *,
+        max_depth: int,
     ) -> None:
         if not seeds:
             return
-        seed_ids = [seed.memory.id for seed in seeds]
         edge_rows = self.session.scalars(
             select(MemoryEdge).where(
-                MemoryEdge.namespace_id == namespace_id, MemoryEdge.source_id.in_(seed_ids)
+                MemoryEdge.namespace_id == namespace_id,
+                MemoryEdge.edge_type != "co_retrieval",
             )
         ).all()
-        target_ids = {edge.target_id for edge in edge_rows}
+        association_rows = self.session.scalars(
+            select(AssociationStat).where(
+                AssociationStat.namespace_id == namespace_id,
+                AssociationStat.effective_weight > 0,
+            )
+        ).all()
+        activation_edges = [
+            ActivationEdge(
+                source_id=edge.source_id,
+                target_id=edge.target_id,
+                edge_type=edge.edge_type,
+                weight=edge.weight,
+                provenance=str(edge.metadata_.get("origin", "memory_edge")),
+            )
+            for edge in edge_rows
+        ]
+        for stat in association_rows:
+            activation_edges.extend(
+                (
+                    ActivationEdge(stat.source_memory_id, stat.target_memory_id, "association", stat.effective_weight, "association_stats"),
+                    ActivationEdge(stat.target_memory_id, stat.source_memory_id, "association", stat.effective_weight, "association_stats"),
+                )
+            )
+        target_ids = {edge.target_id for edge in activation_edges}
         targets = {
             memory.id: memory
             for memory in self.session.scalars(
                 select(Memory).where(Memory.namespace_id == namespace_id, Memory.id.in_(target_ids))
             ).all()
         }
-        grouped: dict[uuid.UUID, list[MemoryEdge]] = {seed_id: [] for seed_id in seed_ids}
-        for edge in edge_rows:
-            grouped[edge.source_id].append(edge)
-        for seed in seeds:
-            ordered_edges = sorted(
-                grouped[seed.memory.id],
-                key=lambda edge: (-edge.weight, targets[edge.target_id].external_id),
-            )[: self.config.retrieval.max_neighbors_per_seed]
-            for edge in ordered_edges:
-                target = targets[edge.target_id]
-                item = candidates.setdefault(
-                    target.id, RankedMemory(memory=target, semantic_score=0.0, source="hebbian")
-                )
-                if edge.edge_type == CONTRADICTS_EDGE_TYPE:
-                    item.activation_path.append(
-                        {
-                            "source_external_id": seed.external_id,
-                            "target_external_id": target.external_id,
-                            "edge_type": edge.edge_type,
-                            "edge_weight": edge.weight,
-                            "source_semantic_score": seed.semantic_score,
-                            "activation_alpha": self.config.retrieval.activation_alpha,
-                            "contribution": 0.0,
-                        }
-                    )
-                    continue
-                contribution = (
-                    seed.semantic_score * edge.weight * self.config.retrieval.activation_alpha
-                )
-                item.hebbian_score += contribution
-                item.activation_path.append(
-                    {
-                        "source_external_id": seed.external_id,
-                        "target_external_id": target.external_id,
-                        "edge_type": edge.edge_type,
-                        "edge_weight": edge.weight,
-                        "source_semantic_score": seed.semantic_score,
-                        "activation_alpha": self.config.retrieval.activation_alpha,
-                        "contribution": contribution,
-                    }
-                )
+        result = activate(
+            {seed.memory.id: seed.semantic_score for seed in seeds},
+            activation_edges,
+            max_depth=max_depth,
+            max_neighbors_per_node=self.config.retrieval.max_neighbors_per_seed,
+            path_budget=self.config.retrieval.path_budget,
+            alpha=self.config.retrieval.activation_alpha,
+        )
+        for target_id, traces in result.paths.items():
+            target = targets.get(target_id)
+            if target is None:
+                continue
+            item = candidates.setdefault(target.id, RankedMemory(memory=target, semantic_score=0.0, source="hebbian"))
+            item.hebbian_score += result.contributions.get(target_id, 0.0)
+            for trace in traces:
+                path = trace.get("activation_path", [])
+                if path:
+                    item.activation_path.append({
+                        **path[-1],
+                        "edge_type": path[-1]["edge_kind"],
+                        "path_depth": trace["path_depth"],
+                        "explored_nodes": result.explored_nodes,
+                        "path_budget_violations": result.budget_violations,
+                    })
+                else:
+                    item.activation_path.append(trace)
 
     def _score(self, items: list[RankedMemory], scope: QueryScope, mode: RetrievalMode) -> None:
         adjustments = self.config.status_adjustments[scope.value]
@@ -163,13 +174,20 @@ class Retriever:
         mode: RetrievalMode,
         scope: QueryScope,
         run_mode: RunMode = RunMode.EVALUATION,
+        *,
+        activation_depth: int | None = None,
     ) -> RetrievalResult:
         started = time.perf_counter()
         semantic = self._semantic_candidates(namespace_id, self.embeddings.embed(query))
         candidates = {item.memory.id: item for item in semantic}
         seeds = semantic[: self.config.retrieval.seed_top_k]
         if mode is RetrievalMode.HEBBIAN:
-            self._spread(namespace_id, seeds, candidates)
+            self._spread(
+                namespace_id,
+                seeds,
+                candidates,
+                max_depth=activation_depth or self.config.retrieval.spread_depth,
+            )
         items = list(candidates.values())
         self._score(items, scope, mode)
         ordered_candidates = sorted(items, key=_tie_key)

@@ -43,12 +43,8 @@ def ask(
             namespace.id,
             cited_ids,
             config.learning,
-            metadata={
-                "origin": "co_retrieval",
-                "retrieval_run_id": str(result.run_id),
-                "answer_citations": answer.citations,
-                "learning_gate_reason": "explicit ask --learn and citation contract passed",
-            },
+            retrieval_run_id=result.run_id,
+            citations=answer.citations,
         )
         session.commit()
     return {"retrieval": result.as_dict(), "answer": answer.model_dump()}

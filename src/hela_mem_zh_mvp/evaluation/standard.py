@@ -91,6 +91,11 @@ def evaluate(
                 RetrievalMode.HEBBIAN,
                 fixture_query.scope,
                 RunMode.EVALUATION,
+                activation_depth=(
+                    config.retrieval.spread_depth
+                    if fixture_query.suite == "architecture_v1"
+                    else 1
+                ),
             )
             answer_error: str | None = None
             try:
@@ -199,6 +204,37 @@ def evaluate(
                     )
                 },
                 "edge_immutability": "PASS" if before == after else "FAIL",
+                "multi_hop": {
+                    "required_queries": sum(record["required_hops"] >= 2 for record in records),
+                    "observed_queries": sum(
+                        any(
+                            path.get("path_depth", 0) >= 2
+                            for item in record["retrieved_memories"]["items"]
+                            for path in item["activation_path"]
+                        )
+                        for record in records
+                    ),
+                    "average_explored_nodes": (
+                        sum(
+                            path.get("explored_nodes", 0)
+                            for record in records
+                            for item in record["retrieved_memories"]["items"]
+                            for path in item["activation_path"]
+                        )
+                        / max(1, sum(
+                            1
+                            for record in records
+                            for item in record["retrieved_memories"]["items"]
+                            for path in item["activation_path"]
+                        ))
+                    ),
+                    "path_budget_violations": sum(
+                        path.get("path_budget_violations", 0)
+                        for record in records
+                        for item in record["retrieved_memories"]["items"]
+                        for path in item["activation_path"]
+                    ),
+                },
             },
             "answers": {
                 "citation_contract_pass": sum(

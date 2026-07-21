@@ -6,10 +6,16 @@ import argparse
 import json
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import load_config
-from .db import create_db_engine, session_factory, verify_database_target
+from .db import (
+    create_db_engine,
+    session_factory,
+    verify_canonical_architecture_schema,
+    verify_database_target,
+)
 from .evaluation.fixtures import load_fixture_bundle
 from .evaluation.live_resolver import run_live_resolver_evaluation
 from .evaluation.single_e2e import (
@@ -19,7 +25,11 @@ from .evaluation.single_e2e import (
     run_single_e2e_evaluation,
 )
 from .evaluation.standard import evaluate
+from .graph.projection import rebuild_projection
 from .ingestion.workflow import ingest
+from .lifecycle.workflow import lifecycle_report
+from .persistence.backfill import canonical_backfill_report
+from .persistence.namespaces import get_namespace
 from .persistence.resolution_reports import resolution_report
 from .providers.embedding import EmbeddingClient
 from .providers.google import GoogleProvider
@@ -46,6 +56,7 @@ def _smoke() -> dict:
         raise ValueError(f"missing required configuration: {', '.join(missing)}")
     engine = create_db_engine(settings)
     verify_database_target(engine, settings)
+    verify_canonical_architecture_schema(engine)
     embedding = EmbeddingClient(settings).smoke()
     provider = GoogleProvider(settings).smoke()
     return {
@@ -67,6 +78,7 @@ def _database_session(*, require_google: bool = True):
         raise ValueError(f"missing required configuration: {', '.join(missing)}")
     engine = create_db_engine(settings)
     verify_database_target(engine, settings)
+    verify_canonical_architecture_schema(engine)
     return session_factory(engine)()
 
 
@@ -95,6 +107,12 @@ def build_parser() -> argparse.ArgumentParser:
     backfill = commands.add_parser("backfill-resolution")
     backfill.add_argument("--namespace", required=True)
     backfill.add_argument("--report-only", action="store_true", default=True)
+    architecture_backfill = commands.add_parser("architecture-backfill")
+    architecture_backfill.add_argument("--namespace", required=True)
+    lifecycle = commands.add_parser("lifecycle-report")
+    lifecycle.add_argument("--namespace", required=True)
+    graph = commands.add_parser("rebuild-graph")
+    graph.add_argument("--namespace", required=True)
     return parser
 
 
@@ -174,6 +192,18 @@ def main(argv: list[str] | None = None) -> int:
                 )
             with _database_session(require_google=False) as session:
                 _print_json(resolution_report(session, args.namespace))
+        elif args.command == "architecture-backfill":
+            with _database_session(require_google=False) as session:
+                _print_json(canonical_backfill_report(session, args.namespace))
+        elif args.command == "lifecycle-report":
+            with _database_session(require_google=False) as session:
+                namespace = get_namespace(session, args.namespace, create=False)
+                _print_json(lifecycle_report(session, namespace.id, now=datetime.now(UTC)))
+        elif args.command == "rebuild-graph":
+            with _database_session(require_google=False) as session:
+                namespace = get_namespace(session, args.namespace, create=False)
+                with session.begin():
+                    _print_json(rebuild_projection(session, namespace.id, load_config().snapshot()))
         return 0
     except ValueError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)

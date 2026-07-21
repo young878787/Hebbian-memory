@@ -10,3 +10,51 @@
 {"message_id":"msg-010","session_id":"fixture-other-01","role":"user","content":"我偏好先做小型概念驗證，並以實際測試驗證演算法假設。","occurred_at":"2026-03-06T12:00:00+08:00","metadata":{}}
 {"message_id":"msg-011","session_id":"fixture-other-01","role":"user","content":"我希望長時間工作有簡短進度提示，敏感金鑰只放在本機環境檔。","occurred_at":"2026-03-08T12:00:00+08:00","metadata":{}}
 {"message_id":"msg-012","session_id":"fixture-other-01","role":"user","content":"我正在研究記憶系統的可追蹤性。","occurred_at":"2026-03-11T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-013","session_id":"fixture-character-01","role":"assistant","content":"角色偏好使用繁體中文溝通。","occurred_at":"2025-12-03T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-014","session_id":"fixture-character-01","role":"assistant","content":"角色喜歡把複雜問題拆成小步驟。","occurred_at":"2025-12-03T12:01:00+08:00","metadata":{}}
+{"message_id":"msg-015","session_id":"fixture-character-01","role":"assistant","content":"角色在不確定時會先說明假設。","occurred_at":"2025-12-04T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-016","session_id":"fixture-character-01","role":"assistant","content":"角色喜歡深夜安靜地整理筆記。","occurred_at":"2025-12-04T12:01:00+08:00","metadata":{}}
+{"message_id":"msg-017","session_id":"fixture-character-01","role":"assistant","content":"角色不喜歡被催促立刻做決定。","occurred_at":"2025-12-05T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-018","session_id":"fixture-character-01","role":"assistant","content":"角色喜歡用清楚的條列記錄結論。","occurred_at":"2025-12-05T12:01:00+08:00","metadata":{}}
+{"message_id":"msg-019","session_id":"fixture-other-01","role":"user","content":"使用者正在整理 RAG 評估資料集。","occurred_at":"2026-03-01T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-020","session_id":"fixture-other-01","role":"user","content":"使用者希望 benchmark 的結果可以重現。","occurred_at":"2026-03-02T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-021","session_id":"fixture-other-01","role":"user","content":"使用者曾排查 PostgreSQL 的向量搜尋設定。","occurred_at":"2026-03-03T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-022","session_id":"fixture-other-01","role":"user","content":"使用者會先確認資料庫 migration 的目標。","occurred_at":"2026-03-04T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-023","session_id":"fixture-other-01","role":"user","content":"使用者正在比較不同 embedding 模型的中文效果。","occurred_at":"2026-03-05T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-024","session_id":"fixture-other-01","role":"user","content":"使用者偏好先做小型概念驗證。","occurred_at":"2026-03-06T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-025","session_id":"fixture-other-01","role":"user","content":"使用者計畫整理語音轉錄的失敗案例。","occurred_at":"2026-03-07T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-026","session_id":"fixture-other-01","role":"user","content":"使用者希望長時間工作有簡短的進度提示。","occurred_at":"2026-03-08T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-027","session_id":"fixture-other-01","role":"user","content":"使用者曾考慮租用雲端 GPU 進行短期測試。","occurred_at":"2026-03-09T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-028","session_id":"fixture-other-01","role":"user","content":"使用者會把敏感金鑰只放在本機環境檔。","occurred_at":"2026-03-10T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-029","session_id":"fixture-other-01","role":"user","content":"使用者正在研究記憶系統的可追蹤性。","occurred_at":"2026-03-11T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-030","session_id":"fixture-other-01","role":"user","content":"使用者偏好以實際測試驗證演算法假設。","occurred_at":"2026-03-12T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-031","session_id":"fixture-noise-01","role":"user","content":"朋友談到資料中心加速器的採購規劃。","occurred_at":"2026-03-13T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-032","session_id":"fixture-noise-01","role":"assistant","content":"論壇文章討論二手硬體的交易風險。","occurred_at":"2026-03-14T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-033","session_id":"fixture-noise-01","role":"user","content":"使用者讀過資料中心運算設備的規格文章。","occurred_at":"2026-03-15T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-034","session_id":"fixture-noise-01","role":"assistant","content":"有人在群組裡分享硬體降價消息。","occurred_at":"2026-03-16T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-035","session_id":"fixture-noise-01","role":"user","content":"使用者比較過二手硬體的保固條款。","occurred_at":"2026-03-17T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-036","session_id":"fixture-noise-01","role":"assistant","content":"角色喜歡藍色的機械鍵盤。","occurred_at":"2025-11-01T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-037","session_id":"fixture-noise-01","role":"user","content":"使用者曾觀看伺服器散熱改裝影片。","occurred_at":"2026-03-18T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-038","session_id":"fixture-noise-01","role":"user","content":"使用者尚未決定是否要更換電腦螢幕。","occurred_at":"2026-03-19T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-039","session_id":"fixture-noise-01","role":"assistant","content":"角色收藏過處理器開箱照片。","occurred_at":"2025-11-02T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-040","session_id":"fixture-noise-01","role":"user","content":"使用者讀過資料中心 GPU 的新聞摘要。","occurred_at":"2026-03-20T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-041","session_id":"fixture-lifestyle-01","role":"user","content":"使用者喜歡週末早晨到附近散步。","occurred_at":"2026-03-21T08:00:00+08:00","metadata":{}}
+{"message_id":"msg-042","session_id":"fixture-lifestyle-01","role":"user","content":"下雨時使用者會改在家閱讀。","occurred_at":"2026-03-22T09:00:00+08:00","metadata":{}}
+{"message_id":"msg-043","session_id":"fixture-lifestyle-02","role":"user","content":"使用者正在學習日文五十音。","occurred_at":"2026-03-23T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-044","session_id":"fixture-lifestyle-02","role":"user","content":"使用者偏好用 Anki 做間隔複習。","occurred_at":"2026-03-24T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-045","session_id":"fixture-lifestyle-03","role":"user","content":"使用者規劃旅行時會拆成交通、住宿與備案。","occurred_at":"2026-03-25T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-046","session_id":"fixture-lifestyle-03","role":"user","content":"使用者曾考慮安排花蓮看海的旅行。","occurred_at":"2026-03-26T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-047","session_id":"fixture-lifestyle-04","role":"user","content":"使用者不吃香菜。","occurred_at":"2026-03-27T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-048","session_id":"fixture-lifestyle-04","role":"user","content":"使用者喜歡清淡的早餐。","occurred_at":"2026-03-28T08:00:00+08:00","metadata":{}}
+{"message_id":"msg-049","session_id":"fixture-lifestyle-05","role":"user","content":"使用者打算每週整理一次閱讀筆記。","occurred_at":"2026-03-29T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-050","session_id":"fixture-lifestyle-05","role":"user","content":"使用者尚未決定閱讀時要用紙本或電子書。","occurred_at":"2026-03-30T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-051","session_id":"fixture-lifestyle-06","role":"user","content":"使用者通勤時喜歡聽知識型 podcast。","occurred_at":"2026-03-31T08:00:00+08:00","metadata":{}}
+{"message_id":"msg-052","session_id":"fixture-lifestyle-06","role":"user","content":"使用者會在星期日準備下一週的餐點。","occurred_at":"2026-04-01T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-053","session_id":"fixture-lifestyle-07","role":"user","content":"使用者最近開始學習基礎攝影。","occurred_at":"2026-04-02T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-054","session_id":"fixture-lifestyle-07","role":"user","content":"使用者做筆記時偏好搭配具體例子。","occurred_at":"2026-04-03T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-055","session_id":"fixture-lifestyle-08","role":"user","content":"使用者曾考慮在雨天參觀博物館。","occurred_at":"2026-04-04T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-056","session_id":"fixture-lifestyle-08","role":"user","content":"使用者尚未決定早上或晚上讀書比較適合。","occurred_at":"2026-04-05T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-057","session_id":"fixture-lifestyle-09","role":"user","content":"使用者平常會避免喝太甜的飲料。","occurred_at":"2026-04-06T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-058","session_id":"fixture-lifestyle-09","role":"user","content":"使用者喜歡依季節選擇當季水果。","occurred_at":"2026-04-07T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-059","session_id":"fixture-lifestyle-10","role":"user","content":"使用者打算每月檢視一次自己的目標。","occurred_at":"2026-04-08T12:00:00+08:00","metadata":{}}
+{"message_id":"msg-060","session_id":"fixture-lifestyle-10","role":"user","content":"使用者暫停了以前報名的線上課程。","occurred_at":"2026-04-09T12:00:00+08:00","metadata":{}}

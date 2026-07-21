@@ -7,6 +7,7 @@ import time
 
 from google import genai
 from google.genai import types
+from pydantic import ValidationError
 
 from ..settings import Settings
 from .base import ProviderError, ProviderProbe, StructuredModel
@@ -29,6 +30,8 @@ def _google_response_schema(value: object) -> object:
 
 
 class GoogleProvider:
+    _STRUCTURED_MAX_ATTEMPTS = 2
+
     def __init__(self, settings: Settings):
         if not settings.google_api_key or not settings.google_api_key.get_secret_value():
             raise ProviderError("GOOGLE_API_KEY is required")
@@ -62,6 +65,28 @@ class GoogleProvider:
         self, prompt: str, response_model: type[StructuredModel]
     ) -> StructuredModel:
         """Generate strict JSON without exposing database actions to the provider."""
+        for attempt in range(1, self._STRUCTURED_MAX_ATTEMPTS + 1):
+            attempt_prompt = prompt
+            if attempt > 1:
+                attempt_prompt += (
+                    "\n前一次回覆未通過 JSON 驗證。請重新產生完整且合法的 JSON，"
+                    "只能輸出符合 schema 的 JSON，不要 Markdown 或額外文字。"
+                )
+            try:
+                return self._generate_structured_once(attempt_prompt, response_model)
+            except Exception as exc:
+                if attempt == self._STRUCTURED_MAX_ATTEMPTS or not self._should_retry_structured(exc):
+                    raise ProviderError(
+                        "structured provider response failed after "
+                        f"{attempt} attempt(s): {type(exc).__name__}: {exc}"
+                    ) from exc
+                time.sleep(min(2 ** (attempt - 1), 10))
+
+        raise AssertionError("structured generation retry loop exhausted unexpectedly")
+
+    def _generate_structured_once(
+        self, prompt: str, response_model: type[StructuredModel]
+    ) -> StructuredModel:
         try:
             response = self.client.models.generate_content(
                 model=self.settings.google_model,
@@ -83,12 +108,19 @@ class GoogleProvider:
             if parsed is not None:
                 return response_model.model_validate(parsed)
             return response_model.model_validate(json.loads((response.text or "").strip()))
-        except ProviderError:
+        except (json.JSONDecodeError, ValidationError):
             raise
-        except Exception as exc:
-            raise ProviderError(
-                f"structured provider response failed validation: {type(exc).__name__}: {exc}"
-            ) from exc
+
+    @staticmethod
+    def _should_retry_structured(exc: Exception) -> bool:
+        if isinstance(exc, (json.JSONDecodeError, ValidationError, TimeoutError)):
+            return True
+        status_code = getattr(exc, "status_code", getattr(exc, "code", None))
+        if status_code is None:
+            return False
+        if status_code == 429 and "quota" not in str(exc).lower():
+            return True
+        return isinstance(status_code, int) and 500 <= status_code < 600
 
     def smoke(self) -> ProviderProbe:
         started = time.perf_counter()

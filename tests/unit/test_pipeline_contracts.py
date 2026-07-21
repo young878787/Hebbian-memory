@@ -30,8 +30,9 @@ def _messages() -> list[SourceMessage]:
 
 def test_fixed_input_is_valid_and_has_stable_ids() -> None:
     messages = load_input_messages()
-    assert len(messages) == 12
+    assert len(messages) == 60
     assert messages[0].message_id == "msg-001"
+    assert messages[-1].message_id == "msg-060"
 
 
 def test_input_rejects_duplicate_message_ids(tmp_path: Path) -> None:

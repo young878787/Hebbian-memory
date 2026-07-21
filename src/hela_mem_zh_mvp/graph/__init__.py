@@ -1,0 +1,1 @@
+"""Rebuildable knowledge-graph projections."""

@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -291,6 +292,188 @@ class MemoryEdge(Timestamped, Base):
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict
     )
+
+
+# v0.6 canonical ledger.  `Memory` remains the compatibility/read model while
+# these tables make evidence, factual relations, learned associations, and
+# rebuildable projections separate durable concerns.
+class MemoryClaim(Timestamped, Base):
+    __tablename__ = "memory_claims"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["namespace_id", "legacy_memory_id"],
+            ["memories.namespace_id", "memories.id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("namespace_id", "id", name="uq_claims_namespace_id"),
+        UniqueConstraint("namespace_id", "legacy_memory_id", name="uq_claims_namespace_memory"),
+        CheckConstraint("status IN ('active','superseded','uncertain','archived')", name="ck_claims_status"),
+        CheckConstraint("confidence BETWEEN 0.0 AND 1.0", name="ck_claims_confidence"),
+        CheckConstraint("importance BETWEEN 0.0 AND 1.0", name="ck_claims_importance"),
+        Index(
+            "uq_claims_one_active_state",
+            "namespace_id",
+            "state_key",
+            unique=True,
+            postgresql_where=text("status = 'active' AND state_key IS NOT NULL"),
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memory_namespaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    legacy_memory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    claim_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    predicate_key: Mapped[str | None] = mapped_column(String(100))
+    object_value: Mapped[str] = mapped_column(Text, nullable=False)
+    object_entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    event_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    polarity: Mapped[str] = mapped_column(String(16), nullable=False, default="affirmed")
+    modality: Mapped[str] = mapped_column(String(16), nullable=False, default="asserted")
+    confidence: Mapped[float] = mapped_column(REAL, nullable=False)
+    importance: Mapped[float] = mapped_column(REAL, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    state_key: Mapped[str | None] = mapped_column(String(64))
+    schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class ClaimEvidence(Timestamped, Base):
+    __tablename__ = "claim_evidence"
+    __table_args__ = (
+        ForeignKeyConstraint(["namespace_id", "claim_id"], ["memory_claims.namespace_id", "memory_claims.id"], ondelete="RESTRICT"),
+        ForeignKeyConstraint(["namespace_id", "source_message_id"], ["source_messages.namespace_id", "source_messages.message_id"], ondelete="RESTRICT"),
+        UniqueConstraint("claim_id", "source_message_id", "evidence_text", name="uq_claim_evidence_source_text"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_message_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    evidence_text: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_start: Mapped[int | None] = mapped_column(Integer)
+    evidence_end: Mapped[int | None] = mapped_column(Integer)
+    extractor_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    extraction_schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class RelationEvidence(Timestamped, Base):
+    __tablename__ = "relation_evidence"
+    __table_args__ = (
+        ForeignKeyConstraint(["namespace_id", "source_claim_id"], ["memory_claims.namespace_id", "memory_claims.id"], ondelete="RESTRICT"),
+        ForeignKeyConstraint(["namespace_id", "target_claim_id"], ["memory_claims.namespace_id", "memory_claims.id"], ondelete="RESTRICT"),
+        CheckConstraint("relation_type IN ('supports','contradicts','supersedes','temporal')", name="ck_relation_evidence_type"),
+        CheckConstraint("source_claim_id <> target_claim_id", name="ck_relation_evidence_no_self"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("memory_namespaces.id", ondelete="RESTRICT"), nullable=False)
+    source_claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    relation_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False, default="directed")
+    origin: Mapped[str] = mapped_column(String(32), nullable=False)
+    evidence_refs: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    confidence: Mapped[float] = mapped_column(REAL, nullable=False)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution_status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+
+
+class AssociationEvent(Timestamped, Base):
+    __tablename__ = "association_events"
+    __table_args__ = (
+        ForeignKeyConstraint(["namespace_id", "source_memory_id"], ["memories.namespace_id", "memories.id"], ondelete="RESTRICT"),
+        ForeignKeyConstraint(["namespace_id", "target_memory_id"], ["memories.namespace_id", "memories.id"], ondelete="RESTRICT"),
+        UniqueConstraint("idempotency_key", name="uq_association_events_idempotency"),
+        CheckConstraint("event_type IN ('cited_together','explicit_positive_feedback','explicit_negative_feedback','answer_rejected','manual_link','decay_checkpoint')", name="ck_association_events_type"),
+        CheckConstraint("source_memory_id < target_memory_id", name="ck_association_events_order"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("memory_namespaces.id", ondelete="RESTRICT"), nullable=False)
+    source_memory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_memory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    delta: Mapped[float] = mapped_column(REAL, nullable=False)
+    retrieval_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("retrieval_runs.id", ondelete="RESTRICT"))
+    evidence_refs: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+
+
+class AssociationStat(Timestamped, Base):
+    __tablename__ = "association_stats"
+    __table_args__ = (
+        ForeignKeyConstraint(["namespace_id", "source_memory_id"], ["memories.namespace_id", "memories.id"], ondelete="RESTRICT"),
+        ForeignKeyConstraint(["namespace_id", "target_memory_id"], ["memories.namespace_id", "memories.id"], ondelete="RESTRICT"),
+        CheckConstraint("source_memory_id < target_memory_id", name="ck_association_stats_order"),
+    )
+    namespace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    source_memory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    target_memory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    positive_strength: Mapped[float] = mapped_column(REAL, nullable=False, default=0.0)
+    negative_strength: Mapped[float] = mapped_column(REAL, nullable=False, default=0.0)
+    activation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rejection_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_reinforced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    effective_weight: Mapped[float] = mapped_column(REAL, nullable=False, default=0.0)
+    decay_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class LifecycleDecision(Timestamped, Base):
+    __tablename__ = "lifecycle_decisions"
+    __table_args__ = (ForeignKeyConstraint(["namespace_id", "claim_id"], ["memory_claims.namespace_id", "memory_claims.id"], ondelete="RESTRICT"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("memory_namespaces.id", ondelete="RESTRICT"), nullable=False)
+    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    before_state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    after_state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    rollback_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class GraphProjectionRun(Timestamped, Base):
+    __tablename__ = "graph_projection_runs"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("memory_namespaces.id", ondelete="RESTRICT"), nullable=False)
+    projection_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    included_claim_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    excluded_claim_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    node_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    edge_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    blocker_counts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GraphProjectionNode(Timestamped, Base):
+    __tablename__ = "graph_projection_nodes"
+    __table_args__ = (ForeignKeyConstraint(["projection_run_id"], ["graph_projection_runs.id"], ondelete="CASCADE"), CheckConstraint("jsonb_array_length(claim_ids) > 0", name="ck_projection_node_provenance"))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    projection_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    node_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    node_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    claim_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+
+
+class GraphProjectionEdge(Timestamped, Base):
+    __tablename__ = "graph_projection_edges"
+    __table_args__ = (ForeignKeyConstraint(["projection_run_id"], ["graph_projection_runs.id"], ondelete="CASCADE"), CheckConstraint("jsonb_array_length(claim_ids) > 0 OR jsonb_array_length(relation_evidence_ids) > 0", name="ck_projection_edge_provenance"))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    projection_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    edge_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    claim_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    relation_evidence_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
 
 
 class RetrievalRun(Timestamped, Base):

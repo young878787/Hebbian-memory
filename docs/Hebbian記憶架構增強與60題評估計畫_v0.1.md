@@ -2,7 +2,7 @@
 
 > 版本：v0.1  
 > 日期：2026-07-20  
-> 狀態：implementation-ready plan；本文件定義後續架構切片與驗收方式，不把目前 fixture contract 綠燈視為新架構已完成。
+> 狀態：implementation in progress；v0.6 additive ledger、bounded activation、report-only lifecycle 與 rebuildable projection 已落地，尚待 live DB migration 與完整 60 題 provider 驗收。
 
 ## 1. 結論與目標
 
@@ -444,3 +444,18 @@ uv run python main.py run --query-limit 60
 5. 32 題 baseline 無 regression，28 題 architecture_v1 依 complexity/target 回報結果。
 6. 動態 learning/forgetting scenarios、並行 state 測試與故障 rollback 全通過。
 7. unit、integration、60 題 deterministic、answer/judge 與 live service 結果分開記錄，不混為單一 PASS。
+
+## 14. 2026-07-20 實作快照
+
+本次完成的可執行切片：
+
+- `20260720_0005_canonical_memory_architecture` 為 additive、forward-only migration；新增 claim/evidence、relation evidence、association event/stat、lifecycle decision 與 graph projection tables，保留既有 `memories` / `memory_edges`。
+- ingestion 的 resolved memory 會 dual-write `memory_claims` 與 `claim_evidence`；extractor 的 `supports`／`contradicts`／`supersedes`／`temporal` 會另存 `relation_evidence`，association origin 受 persistence gate 拒絕升格為 factual relation。
+- `ask --learn` 僅在 answer citation contract 通過後寫入 idempotent `cited_together` events，再 materialize `association_stats`；不再寫入 `co_retrieval` factual edge。
+- retrieval 加入純計算、最多三跳的 activation engine；預設兩跳，另有每節點 neighbor 上限、全域 path budget、cycle prevention、contradiction zero-bonus 與 path trace。baseline evaluation 固定一跳，`architecture_v1` 才使用設定深度。
+- lifecycle 僅提供 frozen-clock、report-only archive proposal；current/high-importance claim 不會被自動 archive。graph projection 僅接受未 archive 且具 claim evidence 的 records，node/edge 都帶 provenance。
+- 新增 `architecture-backfill --namespace ...`、`lifecycle-report --namespace ...` 與 `rebuild-graph --namespace ...`；backfill 固定 report-only，沒有自動 apply。
+
+已完成的 deployment gate：目標 PostgreSQL 已套用 `20260720_0005`，且 runtime schema preflight 已確認 canonical tables 存在。
+
+尚未聲稱完成的 gate：live Postgres scenario、60 題 answer/judge provider run。這些需在 provider 可用時依第 12 節分開驗收。
