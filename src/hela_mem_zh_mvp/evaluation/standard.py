@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import AppConfig
+from ..ingestion.input import load_input_messages
 from ..persistence.models import MemoryEdge
 from ..persistence.namespaces import FIXTURE_NAMESPACE, get_namespace, reset_test_namespace
 from ..providers.base import StructuredProvider
@@ -18,16 +19,33 @@ from ..providers.embedding import EmbeddingClient
 from ..retrieval.answerer import answer_query
 from ..retrieval.contracts import AnswerResult, RetrievalMode, RunMode
 from ..retrieval.service import Retriever
-from .fixtures import load_fixture_bundle, seed_fixtures
+from .fixtures import (
+    load_fixture_bundle,
+    query_reference_answer,
+    query_reference_conversations,
+    seed_fixtures,
+    validate_query_answer_oracles,
+)
 from .judge import judge_answers
+from .reporting import SUMMARY_PATH as DEFAULT_SUMMARY_PATH
+from .reporting import build_qa_section, write_root_summary
 
 RESULTS_DIRECTORY = Path("results/pipeline")
+SUMMARY_PATH = DEFAULT_SUMMARY_PATH
 
 
 def _write_artifact(name: str, payload: Any) -> None:
     RESULTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
     (RESULTS_DIRECTORY / name).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+
+
+def _write_summary(payload: dict[str, Any]) -> None:
+    write_root_summary(
+        payload,
+        results_directory=RESULTS_DIRECTORY,
+        summary_path=SUMMARY_PATH,
     )
 
 
@@ -63,6 +81,8 @@ def evaluate(
     reproduce fixture wording and cardinality.
     """
     bundle = load_fixture_bundle("data/fixtures")
+    source_messages = load_input_messages()
+    validate_query_answer_oracles(bundle.queries, source_messages)
     # Input and fixture schemas are preflighted before the one permitted reset.
     with session.begin():
         get_namespace(session, FIXTURE_NAMESPACE)
@@ -125,6 +145,12 @@ def evaluate(
                     "query_id": fixture_query.query_id,
                     "query": fixture_query.query,
                     "expect_answerable": fixture_query.expect_answerable,
+                    "reference_answer": query_reference_answer(
+                        fixture_query, source_messages
+                    ),
+                    "reference_conversations": query_reference_conversations(
+                        fixture_query, source_messages
+                    ),
                     "must_include": fixture_query.must_include,
                     "must_not_primary": fixture_query.must_not_primary,
                     "category": fixture_query.category,
@@ -246,9 +272,17 @@ def evaluate(
                 ),
                 "provider_errors": sum(record["answer_error"] is not None for record in records),
             },
-            "ai_judge": ai_judge,
+            "qa": build_qa_section(records, ai_judge),
+            "artifacts": {
+                "pipeline_directory": "results/pipeline",
+                "summary": "results/summary.json",
+                "ingestion": "results/pipeline/ingestion.json",
+                "retrieval": "results/pipeline/retrieval.json",
+                "answers": "results/pipeline/answers.json",
+                "judge_input": "results/pipeline/judge_input.json",
+            },
         }
     except Exception as exc:
         summary = {"status": "FAIL", "failure_stage": type(exc).__name__, "error": str(exc)}
-    _write_artifact("summary.json", summary)
+    _write_summary(summary)
     return summary

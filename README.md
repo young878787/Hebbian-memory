@@ -30,7 +30,7 @@ uv run python main.py run --query-limit 10
 uv run python main.py run --input data/input/conversations.jsonl --query "使用者最後對 RTX 3090 的決定是什麼？"
 ```
 
-彙總結果寫入 `results/summary.json`；逐題資料寫入 `results/pipeline/` 的 `retrieval.json`、`answers.json`、`judge_input.json` 與 `summary.json`。`status` 表示整條執行與契約是否跑通，`quality_status` 獨立表示 AI judge 的答案品質；兩者不混為同一個 gate。這個流程使用 `evaluation` mode，不會強化 co-retrieval edge；若任一執行階段、契約或暫用 namespace 清理失敗，會以非零結束碼退出。
+彙總結果只寫入 `results/summary.json`；逐題明細寫入 `results/pipeline/` 的 `retrieval.json`、`answers.json` 與 `judge_input.json`。摘要中的 `qa` 將 AI judge 統計與逐題結果收斂在同一區，每題呈現 `question`、`ai_answer`、`correct_answer`、`judge` 與引用，方便直接掃讀；完整 retrieval 與 provenance 仍保留在 pipeline 明細檔。`status` 表示整條執行與契約是否跑通，`quality_status` 獨立表示 AI judge 的答案品質；兩者不混為同一個 gate。這個流程使用 `evaluation` mode，不會強化 co-retrieval edge；若任一執行階段、契約或暫用 namespace 清理失敗，會以非零結束碼退出。
 
 ## 安全界線
 

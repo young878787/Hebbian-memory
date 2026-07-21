@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
                     load_config(),
                     extractor_model=settings.google_model,
                 )
-            _print_json({"summary": "results/pipeline/summary.json", "status": summary["status"]})
+            _print_json({"summary": "results/summary.json", "status": summary["status"]})
         elif args.command == "live-resolver-evaluate":
             with _database_session() as session:
                 summary = run_live_resolver_evaluation(

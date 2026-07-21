@@ -502,9 +502,10 @@ results/pipeline/resolution.json
 results/pipeline/retrieval.json
 results/pipeline/answers.json
 results/pipeline/judge_input.json
-results/pipeline/summary.json
 results/summary.json
 ```
+
+`results/summary.json` 是唯一的流程摘要位置；`results/pipeline/` 只保留逐階段明細，不再產出重複的 `summary.json`。摘要中的 `qa` 將 AI judge 統計與逐題結果合併；每題固定提供 `question`、`ai_answer`、`correct_answer`、`judge` 與引用。
 
 `extraction.json` 每筆 source message 一個 outcome；`resolution.json` 每個 candidate 一個 immutable decision record，含 before/after、snapshot hash、action、targets、evidence 與 validation status。
 

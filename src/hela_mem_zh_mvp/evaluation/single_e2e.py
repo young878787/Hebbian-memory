@@ -29,11 +29,18 @@ from ..retrieval.answerer import answer_query
 from ..retrieval.contracts import QueryScope, RetrievalMode, RunMode
 from ..retrieval.service import Retriever
 from .contracts import FixtureQuery
-from .fixtures import load_fixture_bundle
+from .fixtures import (
+    load_fixture_bundle,
+    query_reference_answer,
+    query_reference_conversations,
+    validate_query_answer_oracles,
+)
 from .judge import judge_answers
+from .reporting import SUMMARY_PATH as DEFAULT_SUMMARY_PATH
+from .reporting import build_qa_section, write_root_summary
 
 RESULTS_DIRECTORY = Path("results/pipeline")
-SUMMARY_PATH = Path("results/summary.json")
+SUMMARY_PATH = DEFAULT_SUMMARY_PATH
 LEGACY_NAMESPACE = "single-e2e-v1"
 DEFAULT_INPUT_PATH = Path("data/input/conversations.jsonl")
 DEFAULT_QUERY = "使用者最後對 RTX 3090 的決定是什麼？"
@@ -49,10 +56,10 @@ def _write_artifact(name: str, payload: Any) -> None:
 
 
 def _write_summary(payload: dict[str, Any]) -> None:
-    _write_artifact("summary.json", payload)
-    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SUMMARY_PATH.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    write_root_summary(
+        payload,
+        results_directory=RESULTS_DIRECTORY,
+        summary_path=SUMMARY_PATH,
     )
 
 
@@ -135,6 +142,8 @@ def _judge_record(record: dict[str, Any]) -> dict[str, Any]:
         "query_id": record["query_id"],
         "query": record["query"],
         "expect_answerable": record["expect_answerable"],
+        "reference_answer": record["reference_answer"],
+        "reference_conversations": record["reference_conversations"],
         "selected_memories": [
             {
                 "external_id": item["external_id"],
@@ -147,18 +156,6 @@ def _judge_record(record: dict[str, Any]) -> dict[str, Any]:
         "answer": record["answer"],
         "deterministic_checks": record["deterministic_checks"],
     }
-
-
-def _final_qa(answers: list[dict[str, Any]], ai_judge: dict[str, Any]) -> list[dict[str, Any]]:
-    verdicts = {case["query_id"]: case for case in ai_judge.get("cases", [])}
-    return [
-        {
-            **item,
-            "judge_verdict": verdicts.get(item["query_id"], {}).get("verdict"),
-            "judge_reason": verdicts.get(item["query_id"], {}).get("reason"),
-        }
-        for item in answers
-    ]
 
 
 def run_single_e2e_evaluation(
@@ -187,8 +184,11 @@ def run_single_e2e_evaluation(
     answers: list[dict[str, Any]] = []
     try:
         # Validate all local inputs before deleting the obsolete legacy namespace.
-        message_count = len(load_input_messages(input_path))
+        source_messages = load_input_messages(input_path)
+        message_count = len(source_messages)
         queries = _evaluation_queries(query, query_id, query_limit)
+        if any(getattr(item, "reference_message_ids", []) for item in queries):
+            validate_query_answer_oracles(queries, source_messages)
         payload["test"].update(
             {
                 "input_message_count": message_count,
@@ -244,6 +244,10 @@ def run_single_e2e_evaluation(
                 "required_hops": fixture_query.required_hops,
                 "scope": fixture_query.scope.value,
                 "expect_answerable": fixture_query.expect_answerable,
+                "reference_answer": query_reference_answer(fixture_query, source_messages),
+                "reference_conversations": query_reference_conversations(
+                    fixture_query, source_messages
+                ),
                 "retrieved_memories": retrieval,
                 "answer": answer,
                 "answer_error": answer_error,
@@ -256,6 +260,10 @@ def run_single_e2e_evaluation(
                     "query": fixture_query.query,
                     "answer": answer,
                     "error": answer_error,
+                    "reference_answer": query_reference_answer(fixture_query, source_messages),
+                    "reference_conversations": query_reference_conversations(
+                        fixture_query, source_messages
+                    ),
                 }
             )
         judge_input = [_judge_record(record) for record in records if record["answer"] is not None]
@@ -311,8 +319,10 @@ def run_single_e2e_evaluation(
                     },
                     "multi_hop_queries": sum(record["required_hops"] >= 2 for record in records),
                 },
-                "ai_judge": {**ai_judge, "verdict_counts": verdict_counts},
-                "final_qa": _final_qa(answers, ai_judge),
+                "qa": build_qa_section(
+                    records,
+                    {**ai_judge, "verdict_counts": verdict_counts},
+                ),
                 "artifacts": {
                     "pipeline_directory": "results/pipeline",
                     "summary": "results/summary.json",

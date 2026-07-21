@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 from hela_mem_zh_mvp.cli import build_parser
 from hela_mem_zh_mvp.evaluation import single_e2e as single_evaluation
+from hela_mem_zh_mvp.evaluation import standard as standard_evaluation
+from hela_mem_zh_mvp.evaluation.reporting import build_qa_section, build_question_results
 
 
 def test_single_e2e_cli_accepts_batch_and_one_case_overrides() -> None:
@@ -34,6 +36,7 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
     calls: list[str] = []
     monkeypatch.setattr(single_evaluation, "RESULTS_DIRECTORY", tmp_path)
     monkeypatch.setattr(single_evaluation, "SUMMARY_PATH", tmp_path / "root-summary.json")
+    (tmp_path / "summary.json").write_text("obsolete duplicate", encoding="utf-8")
     monkeypatch.setattr(single_evaluation, "load_input_messages", lambda path: [object()])
 
     queries = [
@@ -47,6 +50,7 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
             required_hops=0,
             scope=SimpleNamespace(value="general"),
             expect_answerable=True,
+            reference_message_ids=[],
         )
         for number in (1, 2)
     ]
@@ -176,11 +180,86 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
     }
     assert summary["legacy_namespace_cleanup"]["before"]["edges"] == 3
     assert summary["temporary_namespace_cleanup"]["namespace_exists_after"] is False
-    assert [item["judge_verdict"] for item in summary["final_qa"]] == ["PASS", "PASS"]
+    assert summary["qa"]["verdict_counts"] == {"PASS": 2, "FAIL": 0, "UNSURE": 0}
+    assert [item["judge"]["verdict"] for item in summary["qa"]["questions"]] == [
+        "PASS",
+        "PASS",
+    ]
+    assert summary["qa"]["questions"][0]["question"] == "問題 1"
+    assert summary["qa"]["questions"][0]["ai_answer"] == "有。"
+    assert summary["qa"]["questions"][0]["correct_answer"] is None
     assert {path.name for path in tmp_path.iterdir()} == {
         "root-summary.json",
-        "summary.json",
         "retrieval.json",
         "answers.json",
         "judge_input.json",
     }
+
+
+def test_question_results_are_compact_and_include_answer_comparison() -> None:
+    rows = build_question_results(
+        [
+            {
+                "query_id": "case-1",
+                "query": "問題",
+                "answer": {"answer": "AI 回答", "citations": ["mem-1"]},
+                "reference_answer": {
+                    "answerable": True,
+                    "source_message_ids": ["msg-1", "msg-2"],
+                    "facts": [
+                        {"content": "正確答案一"},
+                        {"content": "正確答案二"},
+                    ],
+                },
+            }
+        ],
+        {"cases": [{"query_id": "case-1", "verdict": "PASS", "reason": "正確"}]},
+    )
+
+    assert rows == [
+        {
+            "query_id": "case-1",
+            "question": "問題",
+            "ai_answer": "AI 回答",
+            "correct_answer": "正確答案一\n正確答案二",
+            "expected_answerable": True,
+            "judge": {"verdict": "PASS", "reason": "正確"},
+            "citations": ["mem-1"],
+            "error": None,
+        }
+    ]
+
+
+def test_qa_section_merges_judge_summary_and_question_rows() -> None:
+    section = build_qa_section(
+        [],
+        {
+            "status": "PASS",
+            "pass_count": 1,
+            "fail_count": 0,
+            "unsure_count": 0,
+            "cases": [],
+            "summary": {"overall": "正確"},
+        },
+    )
+
+    assert section == {
+        "status": "PASS",
+        "verdict_counts": {"PASS": 1, "FAIL": 0, "UNSURE": 0},
+        "summary": {"overall": "正確"},
+        "questions": [],
+    }
+
+
+def test_standard_summary_also_converges_to_root_path(monkeypatch, tmp_path: Path) -> None:
+    pipeline_directory = tmp_path / "pipeline"
+    pipeline_directory.mkdir()
+    (pipeline_directory / "summary.json").write_text("obsolete duplicate", encoding="utf-8")
+    root_summary = tmp_path / "summary.json"
+    monkeypatch.setattr(standard_evaluation, "RESULTS_DIRECTORY", pipeline_directory)
+    monkeypatch.setattr(standard_evaluation, "SUMMARY_PATH", root_summary)
+
+    standard_evaluation._write_summary({"status": "PASS"})
+
+    assert root_summary.exists()
+    assert not (pipeline_directory / "summary.json").exists()

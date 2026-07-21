@@ -74,6 +74,9 @@ class FixtureQuery(BaseModel):
     must_include: list[str] = Field(default_factory=list)
     nice_to_have: list[str] = Field(default_factory=list)
     must_not_primary: list[str] = Field(default_factory=list)
+    # Primary-source oracle used by the answer judge. Fixture memory IDs only
+    # describe retrieval expectations and are not a correctness reference.
+    reference_message_ids: list[str] = Field(default_factory=list)
     expect_answerable: bool
     category: str = Field(min_length=1)
     suite: Literal["baseline", "architecture_v1"] = "baseline"
@@ -97,7 +100,9 @@ class FixtureQuery(BaseModel):
     ] = Field(default_factory=list)
     required_hops: int = Field(default=0, ge=0, le=3)
 
-    @field_validator("must_include", "nice_to_have", "must_not_primary")
+    @field_validator(
+        "must_include", "nice_to_have", "must_not_primary", "reference_message_ids"
+    )
     @classmethod
     def unique_ids(cls, value: list[str]) -> list[str]:
         if len(value) != len(set(value)):

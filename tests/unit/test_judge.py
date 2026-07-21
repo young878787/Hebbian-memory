@@ -65,3 +65,38 @@ def test_judge_batches_large_evaluation_and_compacts_retrieval_trace() -> None:
     assert [case["query_id"] for case in result["cases"]] == [case["query_id"] for case in cases]
     assert result["summary"]["batch_count"] == 3
 
+
+def test_judge_sends_primary_source_as_correctness_oracle() -> None:
+    provider = _FakeJudgeProvider()
+    cases = [
+        {
+            "query_id": "gpu-decision",
+            "query": "最後有沒有買 RTX 3090？",
+            "expect_answerable": True,
+            "reference_conversations": [
+                {
+                    "message_id": "msg-002",
+                    "session_id": "fixture-gpu-01",
+                    "role": "user",
+                    "content": "最後我沒有買 RTX 3090。",
+                    "occurred_at": "2026-01-15T12:00:00+08:00",
+                }
+            ],
+            "selected_memories": [
+                {
+                    "external_id": "incorrect-memory",
+                    "content": "使用者買了 RTX 3090。",
+                    "status": "active",
+                }
+            ],
+            "answer": {"answerable": True, "answer": "有買。", "citations": ["incorrect-memory"]},
+        }
+    ]
+
+    judge_answers(provider, cases)
+
+    assert "reference_answer" in provider.prompts[0]
+    submitted_case = json.loads(provider.prompts[0].split("\n", 1)[1])["cases"][0]
+    assert submitted_case["reference_conversations"] == cases[0]["reference_conversations"]
+    assert submitted_case["reference_answer"]["facts"] == cases[0]["reference_conversations"]
+    assert submitted_case["selected_memories"][0]["content"] == "使用者買了 RTX 3090。"

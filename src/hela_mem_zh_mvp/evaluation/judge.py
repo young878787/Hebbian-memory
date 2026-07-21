@@ -41,6 +41,14 @@ def _compact_case(case: dict[str, Any]) -> dict[str, Any]:
         "query_id": case["query_id"],
         "query": case["query"],
         "expect_answerable": case["expect_answerable"],
+        "reference_answer": case.get(
+            "reference_answer",
+            {
+                "answerable": case["expect_answerable"],
+                "facts": case.get("reference_conversations", []),
+            },
+        ),
+        "reference_conversations": case.get("reference_conversations", []),
         "selected_memories": selected_memories or [],
         "answer": case.get("answer"),
     }
@@ -50,7 +58,11 @@ def _judge_batch(
     provider: StructuredProvider, cases: list[dict[str, Any]], batch_number: int
 ) -> AIJudgeSummary:
     prompt = (
-        "評估以下記憶系統回答。只回傳 answer-judge-summary-v1 JSON，"
+        "評估以下記憶系統回答。reference_answer 是從原始輸入直接擷取的"
+        "canonical 正確答案事實集；不得因 selected_memories 遺漏、錯誤或互相支持而忽略它。"
+        "若答案與 reference_answer 矛盾、聲稱沒有其中明示的事實，或把未確認"
+        "事項說成確定，verdict 必須為 FAIL。selected_memories 只用於評估 grounding。"
+        "只回傳 answer-judge-summary-v1 JSON，"
         "每個 case 剛好一次，reason 不超過 120 字且不可輸出推理過程。"
         f"這是第 {batch_number} 批，共 {len(cases)} 題。\n"
         f"{json.dumps({'schema_version': 'answer-judge-input-v1', 'cases': cases}, ensure_ascii=False)}"

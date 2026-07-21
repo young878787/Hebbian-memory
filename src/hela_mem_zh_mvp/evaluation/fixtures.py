@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..ingestion.contracts import SourceMessage
 from ..persistence.edges import edge_weight, upsert_edge
 from ..persistence.models import Memory, MemoryNamespace
 from ..providers.embedding import EmbeddingClient
@@ -25,6 +26,55 @@ class FixtureBundle:
     edges: list[FixtureEdge]
     queries: list[FixtureQuery]
     aliases: dict[str, list[str]]
+
+
+def query_reference_conversations(
+    query: FixtureQuery, source_messages: list[SourceMessage]
+) -> list[dict[str, str]]:
+    """Materialize one query's answer oracle from immutable primary input."""
+    if not query.reference_message_ids:
+        return []
+    by_id = {message.message_id: message for message in source_messages}
+    unknown = set(query.reference_message_ids) - set(by_id)
+    if unknown:
+        raise FixtureError(
+            f"query {query.query_id} references unknown input message IDs: {sorted(unknown)}"
+        )
+    return [
+        {
+            "message_id": message.message_id,
+            "session_id": message.session_id,
+            "role": message.role,
+            "content": message.content,
+            "occurred_at": message.occurred_at.isoformat(),
+        }
+        for message_id in query.reference_message_ids
+        for message in [by_id[message_id]]
+    ]
+
+
+def query_reference_answer(
+    query: FixtureQuery, source_messages: list[SourceMessage]
+) -> dict[str, object]:
+    """Build the judge's canonical answer facts from the primary source."""
+    conversations = query_reference_conversations(query, source_messages)
+    return {
+        "answerable": query.expect_answerable,
+        "source_message_ids": list(query.reference_message_ids),
+        "facts": conversations,
+    }
+
+
+def validate_query_answer_oracles(
+    queries: list[FixtureQuery], source_messages: list[SourceMessage]
+) -> None:
+    """Fail closed when any evaluation question lacks a primary-source oracle."""
+    for query in queries:
+        reference = query_reference_answer(query, source_messages)
+        if not reference["facts"]:
+            raise FixtureError(
+                f"query {query.query_id} has no primary-source reference answer"
+            )
 
 
 def _load_jsonl(
