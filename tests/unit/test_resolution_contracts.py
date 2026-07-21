@@ -58,6 +58,24 @@ def test_resolution_schema_rejects_unknown_supersede_order() -> None:
         )
 
 
+def test_resolution_schema_rejects_target_shape_mismatches() -> None:
+    with pytest.raises(ValueError, match="requires exactly one target"):
+        ResolutionDecision(
+            candidate_id="new-1",
+            action=ResolutionAction.MERGE_PROVENANCE,
+            confidence=0.99,
+            reason="x",
+        )
+    with pytest.raises(ValueError, match="cannot name targets"):
+        ResolutionDecision(
+            candidate_id="new-1",
+            action=ResolutionAction.CREATE,
+            target_refs=["old-1"],
+            confidence=0.99,
+            reason="x",
+        )
+
+
 def test_ai_post_validation_rejects_target_outside_snapshot() -> None:
     decision = ResolutionDecision(
         candidate_id="new-1",

@@ -768,6 +768,8 @@ max_attempts = 2
 
 `GOOGLE_MODEL` 預設 `gemini-3.1-flash-lite`；`gemma-4-26b-a4b-it` 僅作顯式切換的備選。Google provider 只取得最終選取的記憶、status 與 trace，不得看到測試 oracle。只對 timeout、5xx 與可重試 429 執行第二次嘗試；結構化輸出若因 JSON 或 Pydantic schema 驗證失敗，也以明確 JSON 修復指示執行一次重試。每次退避最多等待 10 秒。400／401／403、無效 model 與 quota exhaustion 不盲目重試。最終失敗時，smoke test 必須以非零 exit code 結束並保留原始錯誤類型；不得吞成空字串、空 JSON 或 retrieval failure。
 
+60 題 answer judge 不得在單一 structured-output request 內要求模型一次回傳全部題目；evaluator 以每批最多 10 題分批呼叫 provider，逐批通過 `AIJudgeSummary` contract 後由 application 彙總 verdict 與原始題目順序。送往 judge 的資料只包含 query、selected memories、answer 與必要的 answerability context，不重送完整 retrieval trace。
+
 ---
 
 ## 拾、小型測試資料

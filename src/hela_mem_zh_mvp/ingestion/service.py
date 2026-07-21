@@ -20,6 +20,9 @@ from ..persistence.models import (
     MemoryEntity,
     MemoryResolutionDecision,
 )
+from ..persistence.models import (
+    MessageExtractionOutcome as StoredMessageExtractionOutcome,
+)
 from ..persistence.models import SourceMessage as StoredSourceMessage
 from ..persistence.namespaces import get_namespace
 from ..persistence.relations import append_relation_evidence
@@ -29,9 +32,11 @@ from .candidates import find_scoped_candidates
 from .contracts import (
     EdgeType,
     ExtractionResult,
+    MessageExtractionOutcome,
     ResolutionAction,
     ResolutionDecision,
     SourceMessage,
+    extraction_coverage,
 )
 from .input import content_hash
 from .normalization import NORMALIZER_VERSION, TOPIC_VERSION, normalize_lookup, state_key, topic_key
@@ -51,6 +56,96 @@ class StoreError(ValueError):
 
 def _merge_unique(values: list[str] | None, additions: list[str]) -> list[str]:
     return list(dict.fromkeys([*(values or []), *additions]))
+
+
+def start_ingestion_run(
+    session: Session,
+    namespace_key: str,
+    messages: list[SourceMessage],
+    *,
+    extractor_model: str,
+) -> IngestionRun:
+    """Durably record source intake before any provider request is made."""
+    namespace = get_namespace(session, namespace_key)
+    for message in messages:
+        existing = session.get(StoredSourceMessage, (namespace.id, message.message_id))
+        digest = content_hash(message.content)
+        if existing and existing.content_hash != digest:
+            raise StoreError(f"message_id conflict for {message.message_id!r}")
+        if existing is None:
+            session.add(
+                StoredSourceMessage(
+                    namespace_id=namespace.id,
+                    message_id=message.message_id,
+                    session_id=message.session_id,
+                    role=message.role,
+                    content=message.content,
+                    content_hash=digest,
+                    occurred_at=message.occurred_at,
+                    metadata_=message.metadata,
+                )
+            )
+    run = IngestionRun(
+        namespace_id=namespace.id,
+        status="extracting",
+        extractor_model=extractor_model,
+        extractor_schema_version="message-extraction-outcome-v1",
+        message_count=len(messages),
+        metadata_={"input_message_ids": [message.message_id for message in messages]},
+    )
+    session.add(run)
+    session.flush()
+    return run
+
+
+def record_extraction_outcomes(
+    session: Session,
+    run: IngestionRun,
+    outcomes: list[MessageExtractionOutcome],
+) -> dict[str, object]:
+    """Persist one immutable coverage outcome for every durable source message."""
+    expected = set((run.metadata_ or {}).get("input_message_ids", []))
+    if len(expected) != run.message_count:
+        raise StoreError("ingestion run is missing its immutable input message IDs")
+    result = extraction_coverage(list((run.metadata_ or {}).get("input_message_ids", [])), outcomes)
+    duplicates = result["duplicate_message_ids"]
+    unexpected = result["unexpected_message_ids"]
+    unreported = result["unreported_message_ids"]
+    if duplicates or unexpected or unreported:
+        raise StoreError(
+            "invalid extraction coverage: "
+            f"duplicates={duplicates}, unexpected={unexpected}, unreported={unreported}"
+        )
+    for outcome in outcomes:
+        session.add(
+            StoredMessageExtractionOutcome(
+                namespace_id=run.namespace_id,
+                ingestion_run_id=run.id,
+                source_message_id=outcome.source_message_id,
+                schema_version=outcome.schema_version,
+                status=outcome.status.value,
+                reason_code=(outcome.reason_code.value if outcome.reason_code else None),
+                provider_attempts=outcome.provider_attempts,
+                error=outcome.error,
+                payload=outcome.model_dump(mode="json"),
+            )
+        )
+    run.error_count = int(result["failed_count"])
+    run.metadata_ = {**(run.metadata_ or {}), "extraction_coverage": result}
+    return result
+
+
+def finish_ingestion_run(
+    session: Session, run: IngestionRun, counts: dict[str, int], *, status: str = "completed"
+) -> None:
+    run.status = status
+    run.completed_at = datetime.now(UTC)
+    run.created_count, run.merged_count = counts["created"], counts["merged"]
+    run.superseded_count, run.contradicted_count, run.ignored_count = (
+        counts["superseded"],
+        counts["contradicted"],
+        counts["ignored"],
+    )
 
 
 def _resolution_topic_key(
@@ -150,36 +245,17 @@ def write_ingestion(
     extractor_model: str,
     resolution: ResolutionConfig,
     external_id_by_canonical_key: dict[str, str] | None = None,
+    run: IngestionRun | None = None,
+    complete_run: bool = True,
 ) -> dict[str, int]:
     """Write one fully validated extraction atomically; caller owns commit/rollback."""
     namespace = get_namespace(session, namespace_key)
-    for message in messages:
-        existing = session.get(StoredSourceMessage, (namespace.id, message.message_id))
-        digest = content_hash(message.content)
-        if existing and existing.content_hash != digest:
-            raise StoreError(f"message_id conflict for {message.message_id!r}")
-        if existing is None:
-            session.add(
-                StoredSourceMessage(
-                    namespace_id=namespace.id,
-                    message_id=message.message_id,
-                    session_id=message.session_id,
-                    role=message.role,
-                    content=message.content,
-                    content_hash=digest,
-                    occurred_at=message.occurred_at,
-                    metadata_=message.metadata,
-                )
-            )
-    session.flush()
-    run = IngestionRun(
-        namespace_id=namespace.id,
-        status="running",
-        extractor_model=extractor_model,
-        extractor_schema_version=extraction.schema_version,
-        message_count=len(messages),
-    )
-    session.add(run)
+    if run is None:
+        run = start_ingestion_run(
+            session, namespace_key, messages, extractor_model=extractor_model
+        )
+    elif run.namespace_id != namespace.id:
+        raise StoreError("ingestion run belongs to another namespace")
     entity_by_candidate = {
         item.candidate_id: _entity(
             session,
@@ -224,6 +300,7 @@ def write_ingestion(
             embedding=embedding,
             memory_type=candidate.memory_type.value,
             topic_key=normalized_topic,
+            attribute_key=candidate.attribute_key,
             entity_ids=entity_ids,
             limit=resolution.candidate_limit,
         )
@@ -499,6 +576,7 @@ def write_ingestion(
             embedding=memory.embedding,
             memory_type=memory.memory_type,
             topic_key=memory.topic_key,
+            attribute_key=memory.attribute_key,
             entity_ids=entity_ids,
             limit=resolution.candidate_limit,
         ):
@@ -535,12 +613,6 @@ def write_ingestion(
                 0.25,
                 {"origin": "resolver"},
             )
-    run.status = "completed"
-    run.completed_at = datetime.now(UTC)
-    run.created_count, run.merged_count = counts["created"], counts["merged"]
-    run.superseded_count, run.contradicted_count, run.ignored_count = (
-        counts["superseded"],
-        counts["contradicted"],
-        counts["ignored"],
-    )
+    if complete_run:
+        finish_ingestion_run(session, run, counts)
     return {"messages": len(messages), **counts}

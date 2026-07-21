@@ -264,6 +264,7 @@ def run_single_e2e_evaluation(
         except Exception as exc:
             ai_judge = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
         checks = {
+            "extraction_coverage": ingestion["coverage_pass"],
             "resolver_decision_persisted": bool(resolver["decision_actions"]),
             "all_queries_completed": len(records) == len(queries),
             "all_answers_returned": all(record["answer"] is not None for record in records),

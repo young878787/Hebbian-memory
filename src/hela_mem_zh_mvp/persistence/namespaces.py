@@ -22,6 +22,7 @@ from .models import (
     MemoryEntity,
     MemoryNamespace,
     MemoryResolutionDecision,
+    MessageExtractionOutcome,
     RelationEvidence,
     RetrievalItem,
     RetrievalRun,
@@ -71,6 +72,9 @@ def reset_namespace(session: Session, namespace_key: str) -> None:
     session.query(MemoryEdge).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
     session.query(MemoryResolutionDecision).filter(MemoryResolutionDecision.candidate_id.in_(candidate_ids)).delete(synchronize_session=False)
     session.query(MemoryCandidate).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
+    session.query(MessageExtractionOutcome).filter_by(namespace_id=namespace_id).delete(
+        synchronize_session=False
+    )
     session.query(MemoryEntity).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
     session.query(Memory).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)
     session.query(Entity).filter_by(namespace_id=namespace_id).delete(synchronize_session=False)

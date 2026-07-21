@@ -7,7 +7,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from ..ingestion.contracts import EdgeType, MemoryStatus, MemoryType
+from ..ingestion.contracts import (
+    EdgeType,
+    ExtractionOutcomeStatus,
+    MemoryStatus,
+    MemoryType,
+)
 from ..retrieval.contracts import QueryScope
 
 
@@ -112,4 +117,29 @@ class FixtureQuery(BaseModel):
             raise ValueError("architecture_v1 queries require architecture_targets")
         if self.required_hops >= 2 and "multi_hop_activation" not in self.architecture_targets:
             raise ValueError("multi-hop queries must target multi_hop_activation")
+        return self
+
+
+class ExtractionExpectedClaim(BaseModel):
+    """Source-centred oracle for live extraction, never fixture-memory IDs."""
+
+    model_config = ConfigDict(extra="forbid")
+    subject: str = Field(min_length=1)
+    memory_type: MemoryType
+    attribute_key: str | None = Field(default=None, min_length=1, max_length=100)
+    required_evidence: str = Field(min_length=1)
+
+
+class LiveExtractionExpectation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_message_id: str = Field(min_length=1, max_length=128)
+    expected_outcome: ExtractionOutcomeStatus
+    expected_claims: list[ExtractionExpectedClaim] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def expected_claims_match_outcome(self) -> LiveExtractionExpectation:
+        if self.expected_outcome is ExtractionOutcomeStatus.EXTRACTED and not self.expected_claims:
+            raise ValueError("EXTRACTED expectation requires expected_claims")
+        if self.expected_outcome is not ExtractionOutcomeStatus.EXTRACTED and self.expected_claims:
+            raise ValueError("only EXTRACTED expectation may contain expected_claims")
         return self

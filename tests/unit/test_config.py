@@ -6,4 +6,5 @@ def test_canonical_config_is_valid() -> None:
     assert config.retrieval.seed_top_k == 3
     assert config.retrieval.final_top_k == 5
     assert config.evaluation.answer_request_interval_seconds == 4.2
+    assert config.evaluation.structured_request_interval_seconds == 5.0
     assert config.status_adjustments["current"]["superseded"] == -0.35

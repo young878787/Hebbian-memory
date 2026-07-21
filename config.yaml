@@ -25,6 +25,7 @@ resolution:
   prompt_version: resolver-zh-v1
 evaluation:
   answer_request_interval_seconds: 4.2
+  structured_request_interval_seconds: 5.0
 status_adjustments:
   historical: {active: 0.00, superseded: 0.00, uncertain: -0.15, archived: -0.25}
   current: {active: 0.15, superseded: -0.35, uncertain: -0.20, archived: -0.40}

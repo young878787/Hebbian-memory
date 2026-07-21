@@ -67,7 +67,7 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
     def fake_ingest(*args, **kwargs):  # noqa: ANN002, ANN003
         calls.append("ingest")
         assert kwargs["input_path"] == Path("input.jsonl")
-        return {"messages": 1, "created": 1, "merged": 0}
+        return {"messages": 1, "created": 1, "merged": 0, "coverage_pass": True}
 
     def fake_resolver_state(*args, **kwargs):  # noqa: ANN002, ANN003
         calls.append("resolver")

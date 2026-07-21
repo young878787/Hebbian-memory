@@ -63,6 +63,7 @@ class EvaluationConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     answer_request_interval_seconds: float = Field(ge=0, le=10)
+    structured_request_interval_seconds: float = Field(ge=0, le=10)
 
 
 class AppConfig(BaseModel):

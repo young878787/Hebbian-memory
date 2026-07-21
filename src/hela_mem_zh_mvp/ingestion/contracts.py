@@ -46,6 +46,20 @@ class ResolutionAction(StrEnum):
     DEFER = "DEFER"
 
 
+class ExtractionOutcomeStatus(StrEnum):
+    EXTRACTED = "EXTRACTED"
+    NO_MEMORY = "NO_MEMORY"
+    FAILED = "FAILED"
+
+
+class NoMemoryReason(StrEnum):
+    NON_DURABLE_CHITCHAT = "non_durable_chitchat"
+    EXTERNAL_NOISE = "external_noise"
+    DUPLICATE_SURFACE_FORM = "duplicate_surface_form"
+    INSUFFICIENT_ASSERTION = "insufficient_assertion"
+    UNSUPPORTED_ROLE_CONTENT = "unsupported_role_content"
+
+
 class EffectiveOrder(StrEnum):
     CANDIDATE_AFTER_TARGET = "candidate_after_target"
     CANDIDATE_BEFORE_TARGET = "candidate_before_target"
@@ -79,7 +93,7 @@ class ExtractedEntity(BaseModel):
     entity_type: EntityType
     aliases_seen: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)
-    evidence: str = Field(min_length=1)
+    evidence: str | None = None
 
 
 class ExtractedMemory(BaseModel):
@@ -95,7 +109,7 @@ class ExtractedMemory(BaseModel):
     importance: float = Field(ge=0, le=1)
     confidence: float = Field(ge=0, le=1)
     evidence_message_ids: list[str] = Field(min_length=1)
-    evidence: str = Field(min_length=1)
+    evidence: str | None = None
 
     @field_validator("occurred_at")
     @classmethod
@@ -150,6 +164,106 @@ class ExtractionResult(BaseModel):
         return self
 
 
+class MessageExtractionOutcome(BaseModel):
+    """One auditable extraction result for exactly one source message."""
+
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal["message-extraction-outcome-v1"]
+    source_message_id: str = Field(min_length=1, max_length=128)
+    status: ExtractionOutcomeStatus
+    entities: list[ExtractedEntity] = Field(default_factory=list)
+    memories: list[ExtractedMemory] = Field(default_factory=list)
+    reason_code: NoMemoryReason | None = None
+    provider_attempts: int = Field(ge=0, default=1)
+    error: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validates_message_outcome(self) -> MessageExtractionOutcome:
+        entity_ids = [entity.candidate_id for entity in self.entities]
+        memory_ids = [memory.candidate_id for memory in self.memories]
+        if len(entity_ids) != len(set(entity_ids)) or len(memory_ids) != len(set(memory_ids)):
+            raise ValueError("candidate_id values must be unique per outcome")
+        if not all(
+            memory.evidence_message_ids == [self.source_message_id]
+            for memory in self.memories
+        ):
+            raise ValueError("each memory evidence_message_ids must equal the primary message")
+        if not all(
+            set(memory.entity_candidate_ids) <= set(entity_ids) for memory in self.memories
+        ):
+            raise ValueError("memory references an unknown entity candidate")
+        if not all(
+            memory.primary_entity_candidate_id in memory.entity_candidate_ids
+            for memory in self.memories
+            if memory.primary_entity_candidate_id is not None
+        ):
+            raise ValueError("primary_entity_candidate_id must be an attached entity")
+        if any(
+            memory.memory_type in {MemoryType.PREFERENCE, MemoryType.CHARACTER_FACT}
+            and memory.primary_entity_candidate_id is None
+            for memory in self.memories
+        ):
+            raise ValueError("preference and character_fact require a primary entity")
+        if any(
+            memory.memory_type is MemoryType.PREFERENCE and memory.attribute_key is None
+            for memory in self.memories
+        ):
+            raise ValueError("preference requires an attribute_key")
+        if self.status is ExtractionOutcomeStatus.EXTRACTED:
+            if not self.memories or self.reason_code is not None or self.error is not None:
+                raise ValueError("EXTRACTED requires memories and no reason/error")
+        elif self.status is ExtractionOutcomeStatus.NO_MEMORY:
+            if self.memories or self.entities or self.reason_code is None or self.error is not None:
+                raise ValueError("NO_MEMORY requires a reason and no extracted values")
+        else:
+            if self.memories or self.entities or self.error is None:
+                raise ValueError("FAILED requires an error and no extracted values")
+        return self
+
+    def as_extraction_result(self) -> ExtractionResult:
+        """Adapt a successful single-message outcome to the legacy writer contract."""
+        if self.status is not ExtractionOutcomeStatus.EXTRACTED:
+            raise ValueError("only EXTRACTED outcomes have an extraction result")
+        return ExtractionResult(
+            schema_version="memory-extraction-v1",
+            source_message_ids=[self.source_message_id],
+            entities=self.entities,
+            memories=self.memories,
+            relations=[],
+        )
+
+
+def extraction_coverage(
+    input_message_ids: list[str], outcomes: list[MessageExtractionOutcome]
+) -> dict[str, object]:
+    """Calculate the deterministic per-message coverage gate without I/O."""
+    supplied = [outcome.source_message_id for outcome in outcomes]
+    expected = set(input_message_ids)
+    actual = set(supplied)
+    duplicates = sorted({item for item in supplied if supplied.count(item) > 1})
+    failed = [
+        outcome.source_message_id
+        for outcome in outcomes
+        if outcome.status is ExtractionOutcomeStatus.FAILED
+    ]
+    return {
+        "input_message_count": len(input_message_ids),
+        "outcome_count": len(outcomes),
+        "extracted_count": sum(
+            outcome.status is ExtractionOutcomeStatus.EXTRACTED for outcome in outcomes
+        ),
+        "no_memory_count": sum(
+            outcome.status is ExtractionOutcomeStatus.NO_MEMORY for outcome in outcomes
+        ),
+        "failed_count": len(failed),
+        "memory_candidate_count": sum(len(outcome.memories) for outcome in outcomes),
+        "unreported_message_ids": sorted(expected - actual),
+        "unexpected_message_ids": sorted(actual - expected),
+        "duplicate_message_ids": duplicates,
+        "failed_message_ids": failed,
+    }
+
+
 class ResolutionDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
     candidate_id: str = Field(min_length=1)
@@ -176,6 +290,10 @@ class ResolutionDecision(BaseModel):
             raise ValueError("SUPERSEDE requires a known effective_order")
         if self.action is ResolutionAction.MERGE_PROVENANCE and len(self.target_refs) > 1:
             raise ValueError("MERGE_PROVENANCE accepts at most one target")
+        if self.action is ResolutionAction.MERGE_PROVENANCE and len(self.target_refs) != 1:
+            raise ValueError("MERGE_PROVENANCE requires exactly one target")
+        if self.action in {ResolutionAction.CREATE, ResolutionAction.DEFER, ResolutionAction.IGNORE} and self.target_refs:
+            raise ValueError(f"{self.action.value} cannot name targets")
         return self
 
 

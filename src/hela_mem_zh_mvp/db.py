@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .settings import EXPECTED_DATABASE, Settings
 
-CANONICAL_ARCHITECTURE_REVISION = "20260720_0005"
+CANONICAL_ARCHITECTURE_REVISION = "20260721_0006"
 CANONICAL_ARCHITECTURE_TABLES = frozenset(
     {
         "memory_claims",
@@ -19,6 +19,7 @@ CANONICAL_ARCHITECTURE_TABLES = frozenset(
         "graph_projection_runs",
         "graph_projection_nodes",
         "graph_projection_edges",
+        "message_extraction_outcomes",
     }
 )
 

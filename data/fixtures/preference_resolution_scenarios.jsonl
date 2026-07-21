@@ -1,0 +1,10 @@
+{"message_id":"pref-001","session_id":"preference-resolution-v1","role":"user","content":"我喜歡喝無糖熱茶。","occurred_at":"2026-01-01T09:00:00+08:00","metadata":{}}
+{"message_id":"pref-002","session_id":"preference-resolution-v1","role":"user","content":"我偏好不加糖的熱茶。","occurred_at":"2026-01-02T09:00:00+08:00","metadata":{}}
+{"message_id":"pref-003","session_id":"preference-resolution-v1","role":"user","content":"閱讀時我喜歡播放輕音樂。","occurred_at":"2026-01-03T09:00:00+08:00","metadata":{}}
+{"message_id":"pref-004","session_id":"preference-resolution-v1","role":"user","content":"現在閱讀時我偏好完全安靜，不再播放音樂。","occurred_at":"2026-02-03T09:00:00+08:00","metadata":{}}
+{"message_id":"pref-005","session_id":"preference-resolution-v1","role":"user","content":"我只喜歡紙本書。","occurred_at":"2026-03-01T09:00:00+08:00","metadata":{}}
+{"message_id":"pref-006","session_id":"preference-resolution-v1","role":"user","content":"我只喜歡電子書。","occurred_at":"2026-03-01T09:00:00+08:00","metadata":{}}
+{"message_id":"pref-007","session_id":"preference-resolution-v1","role":"user","content":"我不吃香菜。","occurred_at":"2026-03-02T09:00:00+08:00","metadata":{}}
+{"message_id":"pref-008","session_id":"preference-resolution-v1","role":"user","content":"我喜歡清淡早餐。","occurred_at":"2026-03-02T09:01:00+08:00","metadata":{}}
+{"message_id":"pref-009","session_id":"preference-resolution-v1","role":"assistant","content":"角色喜歡無糖熱茶。","occurred_at":"2026-03-03T09:00:00+08:00","metadata":{}}
+{"message_id":"pref-010","session_id":"preference-resolution-v1","role":"user","content":"朋友喜歡加糖奶茶，但我還沒決定自己要不要喝。","occurred_at":"2026-03-03T09:01:00+08:00","metadata":{}}

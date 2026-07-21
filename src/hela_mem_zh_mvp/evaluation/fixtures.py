@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..persistence.edges import edge_weight, upsert_edge
 from ..persistence.models import Memory, MemoryNamespace
 from ..providers.embedding import EmbeddingClient
-from .contracts import FixtureEdge, FixtureMemory, FixtureQuery
+from .contracts import FixtureEdge, FixtureMemory, FixtureQuery, LiveExtractionExpectation
 
 
 class FixtureError(ValueError):
@@ -28,7 +28,11 @@ class FixtureBundle:
 
 
 def _load_jsonl(
-    path: Path, model: type[FixtureMemory] | type[FixtureEdge] | type[FixtureQuery]
+    path: Path,
+    model: type[FixtureMemory]
+    | type[FixtureEdge]
+    | type[FixtureQuery]
+    | type[LiveExtractionExpectation],
 ) -> list:
     values: list = []
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -39,6 +43,22 @@ def _load_jsonl(
         except Exception as exc:
             raise FixtureError(f"{path.name}:{number}: {exc}") from exc
     return values
+
+
+def load_live_extraction_expectations(
+    input_path: str | Path, expectation_path: str | Path
+) -> list[LiveExtractionExpectation]:
+    """Load a source-centred live oracle without conflating it with M1..Mn fixtures."""
+    from ..ingestion.input import load_input_messages
+
+    expectations = _load_jsonl(Path(expectation_path), LiveExtractionExpectation)
+    source_ids = {message.message_id for message in load_input_messages(Path(input_path))}
+    expected_ids = [item.source_message_id for item in expectations]
+    if len(expected_ids) != len(set(expected_ids)):
+        raise FixtureError("live extraction expectation source_message_ids must be unique")
+    if set(expected_ids) != source_ids:
+        raise FixtureError("live extraction expectations must cover exactly the input messages")
+    return expectations
 
 
 def load_fixture_bundle(directory: str | Path, *, include_edges: bool = False) -> FixtureBundle:

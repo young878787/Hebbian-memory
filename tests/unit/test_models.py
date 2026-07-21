@@ -18,6 +18,7 @@ from hela_mem_zh_mvp.persistence.models import (
     MemoryEntity,
     MemoryNamespace,
     MemoryResolutionDecision,
+    MessageExtractionOutcome,
     RelationEvidence,
     RetrievalItem,
     RetrievalRun,
@@ -41,10 +42,19 @@ def test_claim_namespace_composite_key_supports_namespace_scoped_foreign_keys() 
     assert ("namespace_id", "id") in constraints
 
 
+def test_message_outcome_is_scoped_to_run_and_source_message() -> None:
+    constraints = {
+        tuple(column.name for column in constraint.columns)
+        for constraint in MessageExtractionOutcome.__table__.constraints
+        if constraint.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("ingestion_run_id", "source_message_id") in constraints
+
+
 @pytest.mark.parametrize(
     "model",
     [
-        MemoryNamespace, SourceMessage, IngestionRun, Entity, EntityAlias, Memory, MemoryEntity,
+        MemoryNamespace, SourceMessage, IngestionRun, MessageExtractionOutcome, Entity, EntityAlias, Memory, MemoryEntity,
         MemoryCandidate, MemoryResolutionDecision, MemoryEdge, RetrievalRun, RetrievalItem,
         MemoryClaim, ClaimEvidence, RelationEvidence, AssociationEvent, AssociationStat,
         LifecycleDecision, GraphProjectionRun, GraphProjectionNode, GraphProjectionEdge,

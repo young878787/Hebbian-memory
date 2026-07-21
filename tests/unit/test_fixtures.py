@@ -1,7 +1,10 @@
 import pytest
 
 from hela_mem_zh_mvp.evaluation.contracts import FixtureQuery
-from hela_mem_zh_mvp.evaluation.fixtures import load_fixture_bundle
+from hela_mem_zh_mvp.evaluation.fixtures import (
+    load_fixture_bundle,
+    load_live_extraction_expectations,
+)
 
 
 def test_fixture_bundle_matches_mvp_contract() -> None:
@@ -70,3 +73,17 @@ def test_fixture_query_requires_explicit_architecture_labels() -> None:
                 "required_hops": 2,
             }
         )
+
+
+def test_live_extraction_oracle_is_source_centred_and_complete() -> None:
+    expectations = load_live_extraction_expectations(
+        "data/fixtures/preference_resolution_scenarios.jsonl",
+        "data/fixtures/preference_resolution_expectations.jsonl",
+    )
+    assert len(expectations) == 10
+    assert expectations[-1].expected_outcome == "NO_MEMORY"
+    assert all(
+        claim.required_evidence
+        for expectation in expectations
+        for claim in expectation.expected_claims
+    )

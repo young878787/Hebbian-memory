@@ -91,6 +91,37 @@ class IngestionRun(Timestamped, Base):
     )
 
 
+class MessageExtractionOutcome(Timestamped, Base):
+    __tablename__ = "message_extraction_outcomes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["namespace_id", "source_message_id"],
+            ["source_messages.namespace_id", "source_messages.message_id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "ingestion_run_id", "source_message_id", name="uq_message_outcomes_run_message"
+        ),
+        CheckConstraint(
+            "status IN ('EXTRACTED','NO_MEMORY','FAILED')", name="ck_message_outcomes_status"
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    namespace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("memory_namespaces.id", ondelete="RESTRICT"), nullable=False
+    )
+    ingestion_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ingestion_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_message_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    provider_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
 class Entity(Timestamped, Base):
     __tablename__ = "entities"
     __table_args__ = (

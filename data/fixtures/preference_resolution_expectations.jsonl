@@ -1,0 +1,10 @@
+{"source_message_id":"pref-001","expected_outcome":"EXTRACTED","expected_claims":[{"subject":"user","memory_type":"preference","attribute_key":"beverage_sweetness","required_evidence":"無糖熱茶"}]}
+{"source_message_id":"pref-002","expected_outcome":"EXTRACTED","expected_claims":[{"subject":"user","memory_type":"preference","attribute_key":"beverage_sweetness","required_evidence":"不加糖的熱茶"}]}
+{"source_message_id":"pref-003","expected_outcome":"EXTRACTED","expected_claims":[{"subject":"user","memory_type":"preference","attribute_key":"reading_audio","required_evidence":"播放輕音樂"}]}
+{"source_message_id":"pref-004","expected_outcome":"EXTRACTED","expected_claims":[{"subject":"user","memory_type":"preference","attribute_key":"reading_audio","required_evidence":"完全安靜"}]}
+{"source_message_id":"pref-005","expected_outcome":"EXTRACTED","expected_claims":[{"subject":"user","memory_type":"preference","attribute_key":"reading_medium","required_evidence":"紙本書"}]}
+{"source_message_id":"pref-006","expected_outcome":"EXTRACTED","expected_claims":[{"subject":"user","memory_type":"preference","attribute_key":"reading_medium","required_evidence":"電子書"}]}
+{"source_message_id":"pref-007","expected_outcome":"EXTRACTED","expected_claims":[{"subject":"user","memory_type":"preference","attribute_key":"food_cilantro","required_evidence":"不吃香菜"}]}
+{"source_message_id":"pref-008","expected_outcome":"EXTRACTED","expected_claims":[{"subject":"user","memory_type":"preference","attribute_key":"breakfast_flavor","required_evidence":"清淡早餐"}]}
+{"source_message_id":"pref-009","expected_outcome":"EXTRACTED","expected_claims":[{"subject":"character","memory_type":"preference","attribute_key":"beverage_sweetness","required_evidence":"角色喜歡無糖熱茶"}]}
+{"source_message_id":"pref-010","expected_outcome":"NO_MEMORY","expected_claims":[]}

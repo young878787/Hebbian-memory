@@ -24,6 +24,7 @@ def find_scoped_candidates(
     embedding: list[float],
     memory_type: str,
     topic_key: str | None,
+    attribute_key: str | None,
     entity_ids: list[UUID],
     limit: int,
 ) -> list[ScopedCandidate]:
@@ -47,6 +48,7 @@ def find_scoped_candidates(
             Memory.namespace_id == namespace_id,
             Memory.memory_type == memory_type,
             Memory.topic_key == topic_key,
+            Memory.attribute_key == (attribute_key or "unknown"),
             Memory.status.in_(("active", "uncertain", "superseded")),
             MemoryEntity.entity_id.in_(entity_ids),
         )

@@ -37,5 +37,8 @@ def test_schema_preflight_reports_missing_canonical_tables(monkeypatch) -> None:
         lambda connection: type("Inspector", (), {"get_table_names": lambda self: ["memories"]})(),
     )
 
-    with pytest.raises(db.SchemaCompatibilityError, match="20260720_0004.*20260720_0005.*memory_claims"):
+    with pytest.raises(
+        db.SchemaCompatibilityError,
+        match="20260720_0004.*20260721_0006.*message_extraction_outcomes",
+    ):
         db.verify_canonical_architecture_schema(Engine())
