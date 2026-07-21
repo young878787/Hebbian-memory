@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .settings import EXPECTED_DATABASE, Settings
 
-CANONICAL_ARCHITECTURE_REVISION = "20260721_0006"
+CANONICAL_ARCHITECTURE_REVISION = "20260721_0007"
 CANONICAL_ARCHITECTURE_TABLES = frozenset(
     {
         "memory_claims",
@@ -22,6 +22,11 @@ CANONICAL_ARCHITECTURE_TABLES = frozenset(
         "message_extraction_outcomes",
     }
 )
+CANONICAL_ARCHITECTURE_COLUMNS = {
+    "memories": {"modality", "temporal_scope"},
+    "memory_claims": {"modality", "temporal_scope"},
+    "claim_evidence": {"evidence_start", "evidence_end"},
+}
 
 
 class SchemaCompatibilityError(ValueError):
@@ -53,14 +58,22 @@ def verify_database_target(engine: Engine, settings: Settings) -> None:
 def verify_canonical_architecture_schema(engine: Engine) -> None:
     """Fail before evaluation resets or ingestion writes to an old schema."""
     with engine.connect() as connection:
-        tables = set(inspect(connection).get_table_names())
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
         missing = sorted(CANONICAL_ARCHITECTURE_TABLES - tables)
+        missing_columns = {
+            table: sorted(required - {column["name"] for column in inspector.get_columns(table)})
+            for table, required in CANONICAL_ARCHITECTURE_COLUMNS.items()
+            if table in tables
+        }
+        missing_columns = {table: columns for table, columns in missing_columns.items() if columns}
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
-    if missing:
+    if missing or missing_columns:
         raise SchemaCompatibilityError(
             "database schema is behind the canonical-memory application revision; "
             f"current revision={revision or 'unknown'}, required={CANONICAL_ARCHITECTURE_REVISION}, "
-            f"missing tables={', '.join(missing)}. Run `uv run alembic upgrade head` against "
+            f"missing tables={', '.join(missing) or 'none'}, missing columns={missing_columns or 'none'}. "
+            "Run `uv run alembic upgrade head` against "
             "the verified HEBBIAN PostgreSQL database before retrying."
         )
 

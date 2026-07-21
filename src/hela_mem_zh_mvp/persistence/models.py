@@ -184,9 +184,24 @@ class Memory(Timestamped, Base):
             "memory_type IN ('character_fact','event','preference','decision')",
             name="ck_memories_type",
         ),
+        CheckConstraint(
+            "modality IN ('asserted','question','uncertain','considered')",
+            name="ck_memories_modality",
+        ),
+        CheckConstraint(
+            "temporal_scope IN ('current','historical','unknown')",
+            name="ck_memories_temporal_scope",
+        ),
         CheckConstraint("importance BETWEEN 0.0 AND 1.0", name="ck_memories_importance"),
         CheckConstraint("confidence BETWEEN 0.0 AND 1.0", name="ck_memories_confidence"),
         Index("ix_memories_namespace_status_occurred_at", "namespace_id", "status", "occurred_at"),
+        Index(
+            "ix_memories_namespace_temporal_status_occurred_at",
+            "namespace_id",
+            "temporal_scope",
+            "status",
+            "occurred_at",
+        ),
         Index(
             "ix_memories_resolution_scope",
             "namespace_id",
@@ -212,6 +227,8 @@ class Memory(Timestamped, Base):
     state_key: Mapped[str | None] = mapped_column(String(64))
     occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    modality: Mapped[str] = mapped_column(String(16), nullable=False, default="asserted")
+    temporal_scope: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
     importance: Mapped[float] = mapped_column(REAL, nullable=False, default=0.5)
     confidence: Mapped[float] = mapped_column(REAL, nullable=False, default=1.0)
     source_session_id: Mapped[str | None] = mapped_column(String(100))
@@ -339,6 +356,14 @@ class MemoryClaim(Timestamped, Base):
         UniqueConstraint("namespace_id", "id", name="uq_claims_namespace_id"),
         UniqueConstraint("namespace_id", "legacy_memory_id", name="uq_claims_namespace_memory"),
         CheckConstraint("status IN ('active','superseded','uncertain','archived')", name="ck_claims_status"),
+        CheckConstraint(
+            "modality IN ('asserted','question','uncertain','considered')",
+            name="ck_claims_modality",
+        ),
+        CheckConstraint(
+            "temporal_scope IN ('current','historical','unknown')",
+            name="ck_claims_temporal_scope",
+        ),
         CheckConstraint("confidence BETWEEN 0.0 AND 1.0", name="ck_claims_confidence"),
         CheckConstraint("importance BETWEEN 0.0 AND 1.0", name="ck_claims_importance"),
         Index(
@@ -364,6 +389,7 @@ class MemoryClaim(Timestamped, Base):
     valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     polarity: Mapped[str] = mapped_column(String(16), nullable=False, default="affirmed")
     modality: Mapped[str] = mapped_column(String(16), nullable=False, default="asserted")
+    temporal_scope: Mapped[str] = mapped_column(String(16), nullable=False, default="unknown")
     confidence: Mapped[float] = mapped_column(REAL, nullable=False)
     importance: Mapped[float] = mapped_column(REAL, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")

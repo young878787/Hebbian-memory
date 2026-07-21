@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -36,9 +37,12 @@ SUMMARY_PATH = DEFAULT_SUMMARY_PATH
 
 def _write_artifact(name: str, payload: Any) -> None:
     RESULTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    (RESULTS_DIRECTORY / name).write_text(
+    artifact_path = RESULTS_DIRECTORY / name
+    temporary_path = artifact_path.with_name(f".{artifact_path.name}.{uuid.uuid4().hex}.tmp")
+    temporary_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
+    temporary_path.replace(artifact_path)
 
 
 def _write_summary(payload: dict[str, Any]) -> None:
@@ -178,10 +182,14 @@ def evaluate(
         except Exception as exc:
             ai_judge = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
         checks = [check for record in records for check in record["deterministic_checks"].values()]
+        contract_status = "PASS" if all(checks) and before == after else "FAIL"
         summary = {
-            "status": "PASS"
-            if all(checks) and ai_judge["status"] == "PASS" and before == after
-            else "FAIL",
+            # The judge is quality review only.  A model verdict must not turn
+            # a deterministic contract failure green (or block a green gate).
+            "status": contract_status,
+            "contract_status": contract_status,
+            "semantic_gate_status": contract_status,
+            "judge_status": ai_judge["status"],
             "ingestion": ingestion,
             "coverage": {
                 "query_count": len(bundle.queries),

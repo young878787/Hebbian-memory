@@ -3,14 +3,20 @@ from pathlib import Path
 import pytest
 
 from hela_mem_zh_mvp.ingestion.contracts import (
+    AssertionDisposition,
     ExtractionOutcomeStatus,
+    MemoryModality,
+    MemoryStatus,
+    MemoryType,
     MessageExtractionOutcome,
     NoMemoryReason,
     SourceMessage,
+    TemporalScope,
     extraction_coverage,
 )
 from hela_mem_zh_mvp.ingestion.extractor import extract_messages
 from hela_mem_zh_mvp.ingestion.input import IngestionError, load_input_messages
+from hela_mem_zh_mvp.ingestion.state import derive_initial_state
 from hela_mem_zh_mvp.retrieval.contracts import AnswerResult
 
 
@@ -144,7 +150,7 @@ def test_extractor_replaces_all_provider_evidence_with_primary_source() -> None:
                 {
                     "candidate_id": "memory-2",
                     "content": "角色不喜歡吵雜和擁擠的環境。",
-                    "memory_type": "preference",
+                    "memory_type": "event",
                     "entity_candidate_ids": ["character-1"],
                     "concepts": [],
                     "attribute_key": "room_noise",
@@ -187,3 +193,144 @@ def test_outcome_coverage_fails_closed_for_missing_duplicate_and_failed_messages
     assert coverage["unreported_message_ids"] == ["m-2"]
     assert coverage["duplicate_message_ids"] == ["m-1"]
     assert coverage["failed_message_ids"] == ["m-1"]
+
+
+def test_v2_outcome_preserves_mixed_atomic_assertions_and_exact_evidence() -> None:
+    message = SourceMessage(
+        message_id="m-v2",
+        session_id="s-1",
+        role="user",
+        content="我需要大顯存，也想知道能否解鎖。謝謝。",
+        occurred_at="2026-02-01T12:00:00+08:00",
+    )
+    provider = StaticProvider(
+        {
+            "schema_version": "message-extraction-outcome-v2",
+            "source_message_id": "m-v2",
+            "status": "EXTRACTED",
+            "assertions": [
+                {
+                    "assertion_id": "a-1",
+                    "evidence_quote": "我需要大顯存",
+                    "disposition": "EXTRACTED",
+                    "memory_candidate_ids": ["memory-1"],
+                },
+                {
+                    "assertion_id": "a-2",
+                    "evidence_quote": "也想知道能否解鎖",
+                    "disposition": "EXTRACTED",
+                    "memory_candidate_ids": ["memory-2"],
+                },
+                {
+                    "assertion_id": "a-3",
+                    "evidence_quote": "謝謝",
+                    "disposition": "NO_MEMORY",
+                    "reason_code": "non_durable_chitchat",
+                },
+            ],
+            "memories": [
+                {
+                    "candidate_id": "memory-1",
+                    "content": "使用者需要大顯存。",
+                    "memory_type": "event",
+                    "entity_candidate_ids": [],
+                    "concepts": [],
+                    "occurred_at": "2026-02-01T12:00:00+08:00",
+                    "importance": 0.8,
+                    "confidence": 0.9,
+                    "evidence_message_ids": ["m-v2"],
+                    "evidence_quote": "我需要大顯存",
+                    "modality": "asserted",
+                    "temporal_scope": "current",
+                },
+                {
+                    "candidate_id": "memory-2",
+                    "content": "使用者正在研究是否能解鎖。",
+                    "memory_type": "event",
+                    "entity_candidate_ids": [],
+                    "concepts": [],
+                    "occurred_at": "2026-02-01T12:00:00+08:00",
+                    "importance": 0.8,
+                    "confidence": 0.8,
+                    "evidence_message_ids": ["m-v2"],
+                    "evidence_quote": "也想知道能否解鎖",
+                    "modality": "question",
+                    "temporal_scope": "current",
+                },
+            ],
+        }
+    )
+    outcome = extract_messages(provider, [message])[0]
+    assert [item.disposition for item in outcome.assertions] == [
+        AssertionDisposition.EXTRACTED,
+        AssertionDisposition.EXTRACTED,
+        AssertionDisposition.NO_MEMORY,
+    ]
+    assert [(item.evidence_start, item.evidence_end) for item in outcome.memories] == [
+        (0, 6),
+        (7, 15),
+    ]
+
+
+def test_v2_rejects_legacy_no_memory_reasons_and_unreferenced_candidates() -> None:
+    with pytest.raises(ValueError, match="legacy NO_MEMORY"):
+        MessageExtractionOutcome(
+            schema_version="message-extraction-outcome-v2",
+            source_message_id="m-1",
+            status="NO_MEMORY",
+            assertions=[
+                {
+                    "assertion_id": "a-1",
+                    "evidence_quote": "片段",
+                    "disposition": "NO_MEMORY",
+                    "reason_code": "insufficient_assertion",
+                }
+            ],
+        )
+
+
+def test_v2_failed_outcome_remains_valid_when_provider_output_is_rejected() -> None:
+    outcome = MessageExtractionOutcome(
+        schema_version="message-extraction-outcome-v2",
+        source_message_id="m-1",
+        status="FAILED",
+        error="ValidationError: malformed provider inventory",
+    )
+    assert outcome.assertions == []
+
+
+def test_v2_normalizes_provider_no_memory_without_creating_a_memory() -> None:
+    message = SourceMessage(
+        message_id="m-noise",
+        session_id="s-1",
+        role="assistant",
+        content="論壇文章討論二手硬體的交易風險。",
+        occurred_at="2026-02-01T12:00:00+08:00",
+    )
+    outcome = extract_messages(
+        StaticProvider(
+            {
+                "schema_version": "message-extraction-outcome-v2",
+                "source_message_id": "m-noise",
+                "status": "EXTRACTED",
+                "reason_code": "unsupported_role_content",
+            }
+        ),
+        [message],
+    )[0]
+    assert outcome.status is ExtractionOutcomeStatus.NO_MEMORY
+    assert outcome.reason_code is None
+    assert outcome.memories == []
+    assert outcome.assertions[0].reason_code is NoMemoryReason.UNSUPPORTED_ROLE_CONTENT
+
+
+def test_initial_state_policy_separates_history_from_lifecycle() -> None:
+    assert derive_initial_state(
+        MemoryModality.ASSERTED, TemporalScope.HISTORICAL, MemoryType.EVENT
+    ).status is MemoryStatus.ACTIVE
+    assert derive_initial_state(
+        MemoryModality.CONSIDERED, TemporalScope.HISTORICAL, MemoryType.EVENT
+    ).status is MemoryStatus.ARCHIVED
+    assert derive_initial_state(
+        MemoryModality.UNCERTAIN, TemporalScope.CURRENT, MemoryType.DECISION
+    ).status is MemoryStatus.UNCERTAIN

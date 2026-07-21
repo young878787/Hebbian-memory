@@ -34,11 +34,18 @@ def test_schema_preflight_reports_missing_canonical_tables(monkeypatch) -> None:
     monkeypatch.setattr(
         db,
         "inspect",
-        lambda connection: type("Inspector", (), {"get_table_names": lambda self: ["memories"]})(),
+        lambda connection: type(
+            "Inspector",
+            (),
+            {
+                "get_table_names": lambda self: ["memories"],
+                "get_columns": lambda self, table: [],  # noqa: ARG005
+            },
+        )(),
     )
 
     with pytest.raises(
         db.SchemaCompatibilityError,
-        match="20260720_0004.*20260721_0006.*message_extraction_outcomes",
+            match="20260720_0004.*20260721_0007.*message_extraction_outcomes",
     ):
         db.verify_canonical_architecture_schema(Engine())

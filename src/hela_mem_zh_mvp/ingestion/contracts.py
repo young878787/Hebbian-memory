@@ -23,6 +23,19 @@ class MemoryType(StrEnum):
     DECISION = "decision"
 
 
+class MemoryModality(StrEnum):
+    ASSERTED = "asserted"
+    QUESTION = "question"
+    UNCERTAIN = "uncertain"
+    CONSIDERED = "considered"
+
+
+class TemporalScope(StrEnum):
+    CURRENT = "current"
+    HISTORICAL = "historical"
+    UNKNOWN = "unknown"
+
+
 class EdgeType(StrEnum):
     TEMPORAL = "temporal"
     SEMANTIC = "semantic"
@@ -58,6 +71,7 @@ class NoMemoryReason(StrEnum):
     DUPLICATE_SURFACE_FORM = "duplicate_surface_form"
     INSUFFICIENT_ASSERTION = "insufficient_assertion"
     UNSUPPORTED_ROLE_CONTENT = "unsupported_role_content"
+    NON_PROPOSITIONAL_FRAGMENT = "non_propositional_fragment"
 
 
 class EffectiveOrder(StrEnum):
@@ -110,6 +124,11 @@ class ExtractedMemory(BaseModel):
     confidence: float = Field(ge=0, le=1)
     evidence_message_ids: list[str] = Field(min_length=1)
     evidence: str | None = None
+    modality: MemoryModality = MemoryModality.ASSERTED
+    temporal_scope: TemporalScope = TemporalScope.UNKNOWN
+    evidence_quote: str | None = None
+    evidence_start: int | None = Field(default=None, ge=0)
+    evidence_end: int | None = Field(default=None, ge=0)
 
     @field_validator("occurred_at")
     @classmethod
@@ -131,7 +150,7 @@ class ExtractionResult(BaseModel):
     """Provider output. It deliberately has no database identifiers or namespace."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal["memory-extraction-v1"]
+    schema_version: Literal["memory-extraction-v1", "memory-extraction-v2"]
     source_message_ids: list[str] = Field(min_length=1)
     entities: list[ExtractedEntity] = Field(default_factory=list)
     memories: list[ExtractedMemory] = Field(default_factory=list)
@@ -164,18 +183,74 @@ class ExtractionResult(BaseModel):
         return self
 
 
+class AssertionDisposition(StrEnum):
+    EXTRACTED = "EXTRACTED"
+    NO_MEMORY = "NO_MEMORY"
+
+
+class AtomicAssertion(BaseModel):
+    """A source-local assertion and its explicit extraction disposition."""
+
+    model_config = ConfigDict(extra="forbid")
+    assertion_id: str = Field(min_length=1)
+    evidence_quote: str = Field(min_length=1)
+    disposition: AssertionDisposition
+    memory_candidate_ids: list[str] = Field(default_factory=list)
+    reason_code: NoMemoryReason | None = None
+
+    @model_validator(mode="after")
+    def validates_disposition(self) -> AtomicAssertion:
+        if self.disposition is AssertionDisposition.EXTRACTED:
+            if not self.memory_candidate_ids or self.reason_code is not None:
+                raise ValueError("EXTRACTED assertion requires memories and no reason")
+        elif self.memory_candidate_ids or self.reason_code is None:
+            raise ValueError("NO_MEMORY assertion requires a reason and no memories")
+        return self
+
+
 class MessageExtractionOutcome(BaseModel):
     """One auditable extraction result for exactly one source message."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal["message-extraction-outcome-v1"]
+    schema_version: Literal["message-extraction-outcome-v1", "message-extraction-outcome-v2"]
     source_message_id: str = Field(min_length=1, max_length=128)
     status: ExtractionOutcomeStatus
     entities: list[ExtractedEntity] = Field(default_factory=list)
     memories: list[ExtractedMemory] = Field(default_factory=list)
+    assertions: list[AtomicAssertion] = Field(default_factory=list)
     reason_code: NoMemoryReason | None = None
     provider_attempts: int = Field(ge=0, default=1)
     error: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalizes_provider_v2_no_memory_shape(cls, value: Any) -> Any:
+        """Accept only the harmless v1-shaped NO_MEMORY provider drift.
+
+        The extractor later records a source-local assertion inventory.  This
+        never promotes a value into a memory or derives a semantic state.
+        """
+        if not isinstance(value, dict) or value.get("schema_version") != "message-extraction-outcome-v2":
+            return value
+        normalized = dict(value)
+        memories = normalized.get("memories") or []
+        reason = normalized.get("reason_code")
+        if normalized.get("status") == ExtractionOutcomeStatus.EXTRACTED.value and not memories:
+            if reason in {
+                item.value
+                for item in (
+                    NoMemoryReason.NON_DURABLE_CHITCHAT,
+                    NoMemoryReason.EXTERNAL_NOISE,
+                    NoMemoryReason.UNSUPPORTED_ROLE_CONTENT,
+                    NoMemoryReason.NON_PROPOSITIONAL_FRAGMENT,
+                )
+            }:
+                normalized["status"] = ExtractionOutcomeStatus.NO_MEMORY.value
+        elif normalized.get("status") == ExtractionOutcomeStatus.EXTRACTED.value:
+            # A top-level reason has no authority for an extracted v2 outcome;
+            # reason codes belong on skipped assertions only.
+            normalized["reason_code"] = None
+        return normalized
 
     @model_validator(mode="after")
     def validates_message_outcome(self) -> MessageExtractionOutcome:
@@ -209,14 +284,58 @@ class MessageExtractionOutcome(BaseModel):
             for memory in self.memories
         ):
             raise ValueError("preference requires an attribute_key")
+        legacy_no_memory_shape = (
+            self.schema_version == "message-extraction-outcome-v2"
+            and self.status is ExtractionOutcomeStatus.NO_MEMORY
+            and not self.assertions
+            and self.reason_code is not None
+        )
+        if (
+            self.schema_version == "message-extraction-outcome-v2"
+            and self.status is not ExtractionOutcomeStatus.FAILED
+            and not legacy_no_memory_shape
+        ):
+            assertion_ids = [assertion.assertion_id for assertion in self.assertions]
+            if not assertion_ids or len(assertion_ids) != len(set(assertion_ids)):
+                raise ValueError("v2 outcomes require unique assertion IDs")
+            referenced = [
+                candidate_id
+                for assertion in self.assertions
+                for candidate_id in assertion.memory_candidate_ids
+            ]
+            if len(referenced) != len(set(referenced)) or set(referenced) != set(memory_ids):
+                raise ValueError("each memory must be referenced by exactly one assertion")
+            forbidden = {
+                NoMemoryReason.DUPLICATE_SURFACE_FORM,
+                NoMemoryReason.INSUFFICIENT_ASSERTION,
+            }
+            if any(assertion.reason_code in forbidden for assertion in self.assertions):
+                raise ValueError("v2 does not allow legacy NO_MEMORY reasons")
+            if any(memory.evidence_quote is None for memory in self.memories):
+                raise ValueError("v2 memories require evidence_quote")
+        elif self.schema_version == "message-extraction-outcome-v1" and self.assertions:
+            raise ValueError("v1 outcomes cannot contain assertion inventory")
         if self.status is ExtractionOutcomeStatus.EXTRACTED:
-            if not self.memories or self.reason_code is not None or self.error is not None:
+            if not self.memories or self.error is not None:
                 raise ValueError("EXTRACTED requires memories and no reason/error")
+            if self.schema_version == "message-extraction-outcome-v1" and self.reason_code is not None:
+                raise ValueError("EXTRACTED requires memories and no reason/error")
+            if self.schema_version == "message-extraction-outcome-v2" and not any(
+                item.disposition is AssertionDisposition.EXTRACTED for item in self.assertions
+            ):
+                raise ValueError("v2 EXTRACTED requires an extracted assertion")
         elif self.status is ExtractionOutcomeStatus.NO_MEMORY:
-            if self.memories or self.entities or self.reason_code is None or self.error is not None:
+            if self.memories or self.entities or self.error is not None:
                 raise ValueError("NO_MEMORY requires a reason and no extracted values")
+            if self.schema_version == "message-extraction-outcome-v1" and self.reason_code is None:
+                raise ValueError("NO_MEMORY requires a reason and no extracted values")
+            if self.schema_version == "message-extraction-outcome-v2" and (
+                (not legacy_no_memory_shape and not self.assertions)
+                or any(item.disposition is not AssertionDisposition.NO_MEMORY for item in self.assertions)
+            ):
+                raise ValueError("v2 NO_MEMORY requires only skipped assertions")
         else:
-            if self.memories or self.entities or self.error is None:
+            if self.memories or self.entities or self.assertions or self.error is None:
                 raise ValueError("FAILED requires an error and no extracted values")
         return self
 
@@ -225,7 +344,11 @@ class MessageExtractionOutcome(BaseModel):
         if self.status is not ExtractionOutcomeStatus.EXTRACTED:
             raise ValueError("only EXTRACTED outcomes have an extraction result")
         return ExtractionResult(
-            schema_version="memory-extraction-v1",
+            schema_version=(
+                "memory-extraction-v2"
+                if self.schema_version == "message-extraction-outcome-v2"
+                else "memory-extraction-v1"
+            ),
             source_message_ids=[self.source_message_id],
             entities=self.entities,
             memories=self.memories,
@@ -257,6 +380,15 @@ def extraction_coverage(
         ),
         "failed_count": len(failed),
         "memory_candidate_count": sum(len(outcome.memories) for outcome in outcomes),
+        "assertion_count": sum(len(outcome.assertions) for outcome in outcomes),
+        "extracted_assertion_count": sum(
+            sum(item.disposition is AssertionDisposition.EXTRACTED for item in outcome.assertions)
+            for outcome in outcomes
+        ),
+        "no_memory_assertion_count": sum(
+            sum(item.disposition is AssertionDisposition.NO_MEMORY for item in outcome.assertions)
+            for outcome in outcomes
+        ),
         "unreported_message_ids": sorted(expected - actual),
         "unexpected_message_ids": sorted(actual - expected),
         "duplicate_message_ids": duplicates,

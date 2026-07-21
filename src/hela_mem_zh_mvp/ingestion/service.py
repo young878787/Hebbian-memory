@@ -15,6 +15,7 @@ from ..persistence.models import (
     Entity,
     EntityAlias,
     IngestionRun,
+    LifecycleDecision,
     Memory,
     MemoryCandidate,
     MemoryEntity,
@@ -48,6 +49,7 @@ from .resolver import (
     resolve_memory,
     snapshot_hash,
 )
+from .state import STATE_POLICY_VERSION, derive_initial_state
 
 
 class StoreError(ValueError):
@@ -89,7 +91,7 @@ def start_ingestion_run(
         namespace_id=namespace.id,
         status="extracting",
         extractor_model=extractor_model,
-        extractor_schema_version="message-extraction-outcome-v1",
+        extractor_schema_version="message-extraction-outcome-v2",
         message_count=len(messages),
         metadata_={"input_message_ids": [message.message_id for message in messages]},
     )
@@ -286,6 +288,9 @@ def write_ingestion(
     }
     created_memories: list[Memory] = []
     for candidate in extraction.memories:
+        initial_state = derive_initial_state(
+            candidate.modality, candidate.temporal_scope, candidate.memory_type
+        )
         normalized_topic, normalized_topic_version = _resolution_topic_key(
             candidate.candidate_id,
             candidate.concepts,
@@ -323,6 +328,8 @@ def write_ingestion(
                     "topic_key": normalized_topic,
                     "attribute_key": candidate.attribute_key or "unknown",
                     "entity_ids": [str(value) for value in entity_ids],
+                    "state_policy_version": STATE_POLICY_VERSION,
+                    "initial_state_reason": initial_state.reason,
                 },
                 embedding=embedding,
             )
@@ -395,6 +402,9 @@ def write_ingestion(
                     candidate.attribute_key,
                 ),
                 occurred_at=candidate.occurred_at,
+                status=initial_state.status.value,
+                modality=candidate.modality.value,
+                temporal_scope=candidate.temporal_scope.value,
                 importance=candidate.importance,
                 confidence=candidate.confidence,
                 source_session_id=next(
@@ -406,6 +416,8 @@ def write_ingestion(
                 embedding=embedding,
                 metadata_={
                     "origin": "extractor",
+                    "state_policy_version": STATE_POLICY_VERSION,
+                    "initial_state_reason": initial_state.reason,
                     "resolution_scope": "entity_topic"
                     if entity_ids and normalized_topic
                     else "no_entity_or_topic",
@@ -440,10 +452,34 @@ def write_ingestion(
         claim_by_candidate[candidate.candidate_id] = ensure_claim(
             session,
             memory,
-            evidence_by_message={message_id: candidate.evidence for message_id in candidate.evidence_message_ids},
+            evidence_by_message={
+                message_id: (
+                    candidate.evidence or "",
+                    candidate.evidence_start or 0,
+                    candidate.evidence_end or len(candidate.evidence or ""),
+                )
+                for message_id in candidate.evidence_message_ids
+            },
             extractor_model=extractor_model,
             schema_version=extraction.schema_version,
         )
+        if resolution_result.existing is None and initial_state.lifecycle_action == "archive":
+            session.add(
+                LifecycleDecision(
+                    namespace_id=namespace.id,
+                    claim_id=claim_by_candidate[candidate.candidate_id].id,
+                    action="archive",
+                    policy_version=STATE_POLICY_VERSION,
+                    reason=initial_state.reason,
+                    before_state={"status": "active"},
+                    after_state={
+                        "status": memory.status,
+                        "modality": memory.modality,
+                        "temporal_scope": memory.temporal_scope,
+                    },
+                    rollback_payload={"status": "active"},
+                )
+            )
         for entity_id in candidate.entity_candidate_ids:
             entity = entity_by_candidate[entity_id]
             if session.get(MemoryEntity, (memory.id, entity.id)) is None:

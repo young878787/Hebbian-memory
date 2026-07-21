@@ -12,6 +12,7 @@ from ..config import ResolutionConfig
 from ..persistence.claims import ensure_claim, sync_claim_view
 from ..persistence.models import (
     IngestionRun,
+    LifecycleDecision,
     Memory,
     MemoryCandidate,
     MemoryEntity,
@@ -32,6 +33,7 @@ from .resolver import (
     snapshot_hash,
     validate_ai_decision,
 )
+from .state import STATE_POLICY_VERSION, derive_initial_state
 
 
 def _candidate_context(
@@ -58,6 +60,8 @@ def _candidate_snapshot(candidate: ExtractedMemory) -> dict[str, object]:
         "attribute_key": candidate.attribute_key,
         "occurred_at": candidate.occurred_at.isoformat(),
         "evidence": candidate.evidence,
+        "modality": candidate.modality.value,
+        "temporal_scope": candidate.temporal_scope.value,
     }
 
 
@@ -74,6 +78,8 @@ def _target_snapshot(scoped: list[ScopedCandidate]) -> tuple[list[dict[str, obje
                 "memory_type": item.memory.memory_type,
                 "attribute_key": item.memory.attribute_key,
                 "status": item.memory.status,
+                "modality": item.memory.modality,
+                "temporal_scope": item.memory.temporal_scope,
                 "occurred_at": item.memory.occurred_at.isoformat()
                 if item.memory.occurred_at
                 else None,
@@ -129,11 +135,14 @@ def _create_memory(session: Session, staged: MemoryCandidate, candidate: Extract
     )
     if source is None:
         raise ValueError("candidate source message is missing")
+    initial_state = derive_initial_state(
+        candidate.modality, candidate.temporal_scope, candidate.memory_type
+    )
     memory = Memory(
         namespace_id=staged.namespace_id,
         external_id=f"mem-{uuid4().hex[:12]}",
         canonical_key=canonical_key(candidate.content, candidate.memory_type.value),
-        extraction_schema_version="memory-extraction-v1",
+        extraction_schema_version="memory-extraction-v2",
         content=candidate.content,
         memory_type=candidate.memory_type.value,
         topic=candidate.concepts[0] if candidate.concepts else None,
@@ -148,13 +157,20 @@ def _create_memory(session: Session, staged: MemoryCandidate, candidate: Extract
             candidate.attribute_key,
         ),
         occurred_at=candidate.occurred_at,
-        status="uncertain",
+        status=initial_state.status.value,
+        modality=candidate.modality.value,
+        temporal_scope=candidate.temporal_scope.value,
         importance=candidate.importance,
         confidence=candidate.confidence,
         source_session_id=source.session_id,
         source_message_ids=candidate.evidence_message_ids,
         embedding=staged.embedding,
-        metadata_={"origin": "cross_message_resolver", "resolution_scope": "entity_topic"},
+        metadata_={
+            "origin": "cross_message_resolver",
+            "resolution_scope": "entity_topic",
+            "state_policy_version": STATE_POLICY_VERSION,
+            "initial_state_reason": initial_state.reason,
+        },
     )
     session.add(memory)
     session.flush()
@@ -342,14 +358,38 @@ def resolve_staged_candidates(
                 continue
             if decision.action is ResolutionAction.MERGE_PROVENANCE:
                 memory = selected[0]
+                if (
+                    memory.modality != candidate.modality.value
+                    or memory.temporal_scope != candidate.temporal_scope.value
+                ):
+                    records.append(
+                        _defer(
+                            session,
+                            staged=staged,
+                            config=config,
+                            snapshot=current_snapshot,
+                            scoped=current,
+                            reason="MERGE_PROVENANCE cannot erase modality or temporal-scope differences",
+                            resolver_model=resolver_model,
+                            confidence=decision.confidence,
+                        )
+                    )
+                    counts["deferred"] += 1
+                    continue
                 memory.source_message_ids = list(
                     dict.fromkeys([*(memory.source_message_ids or []), *candidate.evidence_message_ids])
                 )
                 memory.confidence = max(memory.confidence, candidate.confidence)
                 ensure_claim(
                     session, memory,
-                    evidence_by_message={candidate.evidence_message_ids[0]: candidate.evidence},
-                    extractor_model=resolver_model, schema_version="memory-extraction-v1",
+                    evidence_by_message={
+                        candidate.evidence_message_ids[0]: (
+                            candidate.evidence or "",
+                            candidate.evidence_start or 0,
+                            candidate.evidence_end or len(candidate.evidence or ""),
+                        )
+                    },
+                    extractor_model=resolver_model, schema_version="memory-extraction-v2",
                 )
                 staged.status = "resolved"
                 staged.attempt_count += 1
@@ -368,7 +408,6 @@ def resolve_staged_candidates(
                 raise ValueError(f"unsupported resolution action {decision.action.value}")
             incoming = _create_memory(session, staged, candidate)
             if decision.action is ResolutionAction.CREATE:
-                incoming.status = "active"
                 after = {str(incoming.id): incoming.status}
             else:
                 try:
@@ -388,15 +427,41 @@ def resolve_staged_candidates(
                     continue
             incoming_claim = ensure_claim(
                 session, incoming,
-                evidence_by_message={candidate.evidence_message_ids[0]: candidate.evidence},
-                extractor_model=resolver_model, schema_version="memory-extraction-v1",
+                evidence_by_message={
+                    candidate.evidence_message_ids[0]: (
+                        candidate.evidence or "",
+                        candidate.evidence_start or 0,
+                        candidate.evidence_end or len(candidate.evidence or ""),
+                    )
+                },
+                extractor_model=resolver_model, schema_version="memory-extraction-v2",
             )
+            initial_state = derive_initial_state(
+                candidate.modality, candidate.temporal_scope, candidate.memory_type
+            )
+            if decision.action is ResolutionAction.CREATE and initial_state.lifecycle_action == "archive":
+                session.add(
+                    LifecycleDecision(
+                        namespace_id=staged.namespace_id,
+                        claim_id=incoming_claim.id,
+                        action="archive",
+                        policy_version=STATE_POLICY_VERSION,
+                        reason=initial_state.reason,
+                        before_state={"status": "active"},
+                        after_state={
+                            "status": incoming.status,
+                            "modality": incoming.modality,
+                            "temporal_scope": incoming.temporal_scope,
+                        },
+                        rollback_payload={"status": "active"},
+                    )
+                )
             for target in selected:
                 sync_claim_view(session, target)
                 target_claim = ensure_claim(
                     session, target,
                     evidence_by_message={}, extractor_model=resolver_model,
-                    schema_version="memory-extraction-v1",
+                    schema_version="memory-extraction-v2",
                 )
                 if decision.action in {ResolutionAction.SUPERSEDE, ResolutionAction.CONTRADICT}:
                     append_relation_evidence(

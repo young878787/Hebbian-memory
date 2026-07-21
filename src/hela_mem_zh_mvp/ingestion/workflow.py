@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from ..config import load_config
+from ..evaluation.fixtures import load_key_extraction_expectations
+from ..evaluation.semantic_gate import evaluate_extraction_semantics
 from ..providers.base import StructuredProvider
 from ..providers.embedding import EmbeddingClient
 from .contracts import ExtractionOutcomeStatus, MessageExtractionOutcome
@@ -24,13 +27,17 @@ from .service import (
 )
 
 RESULTS_DIRECTORY = Path("results/pipeline")
+SEMANTIC_CANARY_PATH = Path("data/fixtures/live_extraction_expectations.jsonl")
 
 
 def _write_artifact(name: str, payload: object) -> None:
     RESULTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    (RESULTS_DIRECTORY / name).write_text(
+    artifact_path = RESULTS_DIRECTORY / name
+    temporary_path = artifact_path.with_name(f".{artifact_path.name}.{uuid.uuid4().hex}.tmp")
+    temporary_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
+    temporary_path.replace(artifact_path)
 
 
 def ingest(
@@ -57,7 +64,7 @@ def ingest(
         except Exception as exc:
             outcomes.append(
                 MessageExtractionOutcome(
-                    schema_version="message-extraction-outcome-v1",
+                    schema_version="message-extraction-outcome-v2",
                     source_message_id=message.message_id,
                     status=ExtractionOutcomeStatus.FAILED,
                     provider_attempts=1,
@@ -66,9 +73,18 @@ def ingest(
             )
     with session.begin():
         coverage = record_extraction_outcomes(session, run, outcomes)
+    canary_expectations = load_key_extraction_expectations(SEMANTIC_CANARY_PATH)
+    applicable_expectations = [
+        item for item in canary_expectations if item.source_message_id in {message.message_id for message in messages}
+    ]
+    semantic_gate = (
+        evaluate_extraction_semantics(outcomes, messages, applicable_expectations)
+        if applicable_expectations
+        else {"status": "SKIPPED", "checked_message_count": 0, "failures": []}
+    )
     _write_artifact("extraction.json", [outcome.model_dump(mode="json") for outcome in outcomes])
     _write_artifact("extraction_coverage.json", coverage)
-    resolution_config = config.resolution
+    _write_artifact("extraction_semantic_gate.json", semantic_gate)
     counts = {
         "created": 0,
         "merged": 0,
@@ -77,6 +93,21 @@ def ingest(
         "ignored": 0,
         "deferred": 0,
     }
+    if semantic_gate["status"] == "FAIL":
+        # Source-to-memory failures are fail-closed: outcome audit remains
+        # durable, but no invalid candidate reaches staging or canonical rows.
+        with session.begin():
+            finish_ingestion_run(session, run, counts, status="failed_semantic")
+        _write_artifact("resolution.json", [])
+        return {
+            "status": "FAILED_SEMANTIC",
+            "coverage_pass": False,
+            "messages": len(messages),
+            **counts,
+            "coverage": coverage,
+            "semantic_gate": semantic_gate,
+        }
+    resolution_config = config.resolution
     for message, outcome in zip(messages, outcomes, strict=True):
         if outcome.status is not ExtractionOutcomeStatus.EXTRACTED:
             continue
@@ -112,10 +143,18 @@ def ingest(
             status="partial" if coverage["failed_count"] else "completed",
         )
     _write_artifact("resolution.json", resolution_records)
+    status = (
+        "PARTIAL"
+        if coverage["failed_count"]
+        else "FAILED_SEMANTIC"
+        if semantic_gate["status"] == "FAIL"
+        else "COMPLETED"
+    )
     return {
-        "status": "PARTIAL" if coverage["failed_count"] else "COMPLETED",
-        "coverage_pass": not coverage["failed_count"],
+        "status": status,
+        "coverage_pass": not coverage["failed_count"] and semantic_gate["status"] != "FAIL",
         "messages": len(messages),
         **counts,
         "coverage": coverage,
+        "semantic_gate": semantic_gate,
     }

@@ -12,7 +12,7 @@ def ensure_claim(
     session: Session,
     memory: Memory,
     *,
-    evidence_by_message: dict[str, str],
+    evidence_by_message: dict[str, tuple[str, int, int]],
     extractor_model: str,
     schema_version: str,
 ) -> MemoryClaim:
@@ -43,6 +43,7 @@ def ensure_claim(
             )
             if active_exists is not None:
                 initial_status = "uncertain"
+                memory.status = initial_status
         claim = MemoryClaim(
             namespace_id=memory.namespace_id,
             legacy_memory_id=memory.id,
@@ -53,6 +54,8 @@ def ensure_claim(
             confidence=memory.confidence,
             importance=memory.importance,
             status=initial_status,
+            modality=memory.modality,
+            temporal_scope=memory.temporal_scope,
             state_key=memory.state_key,
             schema_version=schema_version,
         )
@@ -64,7 +67,7 @@ def ensure_claim(
             select(ClaimEvidence).where(ClaimEvidence.claim_id == claim.id)
         ).all()
     }
-    for message_id, evidence in evidence_by_message.items():
+    for message_id, (evidence, evidence_start, evidence_end) in evidence_by_message.items():
         if (message_id, evidence) not in known:
             session.add(
                 ClaimEvidence(
@@ -72,6 +75,8 @@ def ensure_claim(
                     claim_id=claim.id,
                     source_message_id=message_id,
                     evidence_text=evidence,
+                    evidence_start=evidence_start,
+                    evidence_end=evidence_end,
                     extractor_model=extractor_model,
                     extraction_schema_version=schema_version,
                 )
@@ -93,6 +98,8 @@ def sync_claim_view(session: Session, memory: Memory) -> None:
     claim = claim_for_memory(session, memory)
     if claim is not None:
         claim.status = memory.status
+        claim.modality = memory.modality
+        claim.temporal_scope = memory.temporal_scope
         claim.confidence = memory.confidence
         claim.importance = memory.importance
 

@@ -10,8 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ..ingestion.contracts import (
     EdgeType,
     ExtractionOutcomeStatus,
+    MemoryModality,
     MemoryStatus,
     MemoryType,
+    TemporalScope,
 )
 from ..retrieval.contracts import QueryScope
 
@@ -133,6 +135,10 @@ class ExtractionExpectedClaim(BaseModel):
     memory_type: MemoryType
     attribute_key: str | None = Field(default=None, min_length=1, max_length=100)
     required_evidence: str = Field(min_length=1)
+    modality: MemoryModality = MemoryModality.ASSERTED
+    temporal_scope: TemporalScope = TemporalScope.UNKNOWN
+    expected_status: MemoryStatus = MemoryStatus.ACTIVE
+    forbidden_assertions: list[str] = Field(default_factory=list)
 
 
 class LiveExtractionExpectation(BaseModel):
@@ -140,6 +146,7 @@ class LiveExtractionExpectation(BaseModel):
     source_message_id: str = Field(min_length=1, max_length=128)
     expected_outcome: ExtractionOutcomeStatus
     expected_claims: list[ExtractionExpectedClaim] = Field(default_factory=list)
+    expected_atomic_count: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def expected_claims_match_outcome(self) -> LiveExtractionExpectation:

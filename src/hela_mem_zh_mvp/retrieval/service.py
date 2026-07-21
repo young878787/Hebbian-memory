@@ -124,13 +124,20 @@ class Retriever:
         adjustments = self.config.status_adjustments[scope.value]
         for item in items:
             item.status_adjustment = adjustments[item.memory.status]
+            temporal_scope = getattr(item.memory, "temporal_scope", "unknown") or "unknown"
+            if temporal_scope == "historical":
+                if scope is QueryScope.CURRENT:
+                    item.status_adjustment -= 0.20
+                elif scope is QueryScope.GENERAL:
+                    item.status_adjustment -= 0.05
             item.final_score = item.semantic_score + item.status_adjustment
             if mode is RetrievalMode.HEBBIAN:
                 item.final_score += item.hebbian_score
 
     @staticmethod
     def _mark_selected(
-        items: list[RankedMemory], seeds: list[RankedMemory], mode: RetrievalMode, final_top_k: int
+        items: list[RankedMemory], seeds: list[RankedMemory], mode: RetrievalMode,
+        final_top_k: int, scope: QueryScope = QueryScope.GENERAL
     ) -> None:
         if mode is RetrievalMode.EMBEDDING_ONLY:
             chosen = sorted(items, key=_tie_key)[:final_top_k]
@@ -163,6 +170,16 @@ class Retriever:
             chosen = sorted([*seeds, *contradictions[:remaining]], key=_tie_key)
             chosen.extend(bonus[: max(0, final_top_k - len(chosen))])
             chosen = sorted(chosen, key=_tie_key)[:final_top_k]
+        # An archived record can provide current-query background but cannot
+        # lead when any non-archived evidence is available.
+        if scope is QueryScope.CURRENT and chosen and chosen[0].memory.status == "archived":
+            replacement = next(
+                (item for item in sorted(items, key=_tie_key) if item.memory.status != "archived"),
+                None,
+            )
+            if replacement is not None:
+                chosen = [replacement, *[item for item in chosen if item is not replacement]]
+                chosen = chosen[:final_top_k]
         for rank, item in enumerate(chosen, start=1):
             item.selected = True
             item.final_rank = rank
@@ -193,7 +210,7 @@ class Retriever:
         ordered_candidates = sorted(items, key=_tie_key)
         for rank, item in enumerate(ordered_candidates, start=1):
             item.candidate_rank = rank
-        self._mark_selected(items, seeds, mode, self.config.retrieval.final_top_k)
+        self._mark_selected(items, seeds, mode, self.config.retrieval.final_top_k, scope)
         latency_ms = (time.perf_counter() - started) * 1000
         run = create_retrieval_run(
             self.session,

@@ -50,9 +50,12 @@ DEFAULT_QUERY_LIMIT = 60
 
 def _write_artifact(name: str, payload: Any) -> None:
     RESULTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    (RESULTS_DIRECTORY / name).write_text(
+    artifact_path = RESULTS_DIRECTORY / name
+    temporary_path = artifact_path.with_name(f".{artifact_path.name}.{uuid.uuid4().hex}.tmp")
+    temporary_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
     )
+    temporary_path.replace(artifact_path)
 
 
 def _write_summary(payload: dict[str, Any]) -> None:

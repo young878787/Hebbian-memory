@@ -111,6 +111,11 @@ def load_live_extraction_expectations(
     return expectations
 
 
+def load_key_extraction_expectations(path: str | Path) -> list[LiveExtractionExpectation]:
+    """Load a deliberately partial canary oracle without weakening full coverage loaders."""
+    return _load_jsonl(Path(path), LiveExtractionExpectation)
+
+
 def load_fixture_bundle(directory: str | Path, *, include_edges: bool = False) -> FixtureBundle:
     """Load the fixture corpus without requiring legacy edge projections.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -99,10 +100,12 @@ def write_root_summary(
 ) -> None:
     """Write the canonical root summary and remove the obsolete duplicate."""
     summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(
+    temporary_path = summary_path.with_name(f".{summary_path.name}.{uuid.uuid4().hex}.tmp")
+    temporary_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
+    temporary_path.replace(summary_path)
     pipeline_summary_path = results_directory / "summary.json"
     if pipeline_summary_path != summary_path:
         pipeline_summary_path.unlink(missing_ok=True)
