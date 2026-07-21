@@ -1,5 +1,0 @@
-{"message_id":"msg-003","session_id":"fixture-gpu-02","role":"user","content":"最近開始研究 CMP 170HX，還不確定改裝風險。","occurred_at":"2026-02-01T12:00:00+08:00","metadata":{}}
-{"message_id":"msg-004","session_id":"fixture-gpu-02","role":"user","content":"我需要大顯存來測試本機語言模型，也想知道 CMP 170HX 能否解鎖更大顯存。","occurred_at":"2026-02-04T12:00:00+08:00","metadata":{}}
-{"message_id":"msg-045","session_id":"fixture-lifestyle-03","role":"user","content":"使用者規劃旅行時會拆成交通、住宿與備案。","occurred_at":"2026-03-25T12:00:00+08:00","metadata":{}}
-{"message_id":"msg-046","session_id":"fixture-lifestyle-03","role":"user","content":"使用者曾考慮安排花蓮看海的旅行。","occurred_at":"2026-03-26T12:00:00+08:00","metadata":{}}
-{"message_id":"msg-050","session_id":"fixture-lifestyle-05","role":"user","content":"使用者尚未決定閱讀時要用紙本或電子書。","occurred_at":"2026-03-30T12:00:00+08:00","metadata":{}}

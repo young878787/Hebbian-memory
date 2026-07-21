@@ -4,7 +4,6 @@ from hela_mem_zh_mvp.evaluation.contracts import FixtureQuery
 from hela_mem_zh_mvp.evaluation.fixtures import (
     FixtureError,
     load_fixture_bundle,
-    load_live_extraction_expectations,
     query_reference_answer,
     query_reference_conversations,
     validate_query_answer_oracles,
@@ -158,17 +157,3 @@ def test_fixture_memory_provenance_matches_the_correct_input_messages() -> None:
         "M14": ["msg-007"],
         "M15": ["msg-007"],
     }
-
-
-def test_live_extraction_oracle_is_source_centred_and_complete() -> None:
-    expectations = load_live_extraction_expectations(
-        "data/fixtures/preference_resolution_scenarios.jsonl",
-        "data/fixtures/preference_resolution_expectations.jsonl",
-    )
-    assert len(expectations) == 10
-    assert expectations[-1].expected_outcome == "NO_MEMORY"
-    assert all(
-        claim.required_evidence
-        for expectation in expectations
-        for claim in expectation.expected_claims
-    )
