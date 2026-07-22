@@ -20,6 +20,13 @@ from ..persistence.models import (
 )
 from ..persistence.models import SourceMessage as StoredSourceMessage
 from ..persistence.namespaces import get_namespace
+from ..persistence.normalization import (
+    NORMALIZER_VERSION,
+    TOPIC_VERSION,
+    normalize_lookup,
+    state_key,
+    topic_key,
+)
 from ..persistence.relations import upsert_memory_relation
 from ..persistence.resolutions import ResolutionApplyError, apply_resolution
 from ..providers.embedding import EmbeddingClient
@@ -34,7 +41,6 @@ from .contracts import (
     extraction_coverage,
 )
 from .input import content_hash
-from .normalization import NORMALIZER_VERSION, TOPIC_VERSION, normalize_lookup, state_key, topic_key
 from .resolver import (
     Resolution,
     candidate_key,

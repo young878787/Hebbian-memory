@@ -21,6 +21,7 @@ from ..retrieval.answerer import AnswerError, answer_query
 from ..retrieval.contracts import AnswerResult, RetrievalMode, RunMode
 from ..retrieval.service import Retriever
 from .fixtures import (
+    derive_fixture_temporal_relations,
     load_fixture_bundle,
     query_reference_answer,
     query_reference_conversations,
@@ -99,17 +100,20 @@ def evaluate(
             seeded_count = seed_fixtures(
                 session, bundle, embeddings, namespace_key=FIXTURE_NAMESPACE
             )
+            namespace = get_namespace(session, FIXTURE_NAMESPACE, create=False)
+            derived_edge_count = derive_fixture_temporal_relations(session, namespace.id)
         ingestion = {
             "mode": "fixture_seed",
             "fixture_memory_count": seeded_count,
             "fixture_edge_count": len(bundle.edges),
+            "derived_edge_count": derived_edge_count,
             "extractor_model": extractor_model,
         }
         namespace = get_namespace(session, FIXTURE_NAMESPACE, create=False)
         before = _edge_checksum(session, namespace.id)
         records: list[dict[str, Any]] = []
         answers: list[dict[str, Any]] = []
-        retriever = Retriever(session, config, embeddings)
+        retriever = Retriever(session, config, embeddings, provider)
         for query_index, fixture_query in enumerate(bundle.queries):
             result = retriever.retrieve(
                 namespace.id,
@@ -148,8 +152,9 @@ def evaluate(
                     citations=[],
                 )
             selected = [item.external_id for item in result.items if item.selected]
+            candidates = [item.external_id for item in result.items]
             deterministic = {
-                "must_include": set(fixture_query.must_include) <= set(selected),
+                "selected_evidence": fixture_query.selected_evidence_matches(selected),
                 "must_not_primary": not selected
                 or selected[0] not in fixture_query.must_not_primary,
                 "citation_membership": set(answer.citations) <= set(selected),
@@ -169,12 +174,14 @@ def evaluate(
                         fixture_query, source_messages
                     ),
                     "must_include": fixture_query.must_include,
+                    "selected_evidence_groups": fixture_query.selected_evidence_groups,
                     "must_not_primary": fixture_query.must_not_primary,
                     "category": fixture_query.category,
                     "suite": fixture_query.suite,
                     "complexity": fixture_query.complexity,
                     "architecture_targets": fixture_query.architecture_targets,
                     "required_hops": fixture_query.required_hops,
+                    "candidate_must_include": set(fixture_query.must_include) <= set(candidates),
                     "retrieved_memories": result.as_dict(),
                     "answer": answer.model_dump(),
                     "answer_error": answer_error,
@@ -200,14 +207,33 @@ def evaluate(
             ai_judge = judge_answers(provider, records)
         except Exception as exc:
             ai_judge = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
-        checks = [check for record in records for check in record["deterministic_checks"].values()]
-        contract_status = "PASS" if all(checks) and before == after else "FAIL"
+        contract_checks = [
+            record["deterministic_checks"]["citation_membership"]
+            and record["answer_error"] is None
+            for record in records
+        ]
+        semantic_checks = [
+            record["deterministic_checks"][key]
+            for record in records
+            for key in (
+                "selected_evidence",
+                "must_not_primary",
+                "answerable_matches_expectation",
+            )
+        ]
+        contract_status = "PASS" if all(contract_checks) and before == after else "FAIL"
+        semantic_status = "PASS" if all(semantic_checks) else "FAIL"
+        overall_status = (
+            "PASS" if contract_status == "PASS" and semantic_status == "PASS" else "FAIL"
+        )
         summary = {
             # The judge is quality review only.  A model verdict must not turn
             # a deterministic contract failure green (or block a green gate).
-            "status": contract_status,
+            "status": overall_status,
             "contract_status": contract_status,
+            "semantic_status": semantic_status,
             "judge_status": ai_judge["status"],
+            "config_snapshot": config.snapshot(),
             "ingestion": ingestion,
             "coverage": {
                 "query_count": len(bundle.queries),
@@ -233,16 +259,23 @@ def evaluate(
             },
             "retrieval": {
                 "query_count": len(records),
-                "must_include_pass": sum(
-                    record["deterministic_checks"]["must_include"] for record in records
+                "model_rerank_applied": sum(
+                    any(item["model_rerank_score"] > 0 for item in record["retrieved_memories"]["items"])
+                    for record in records
+                ),
+                "selected_evidence_pass": sum(
+                    record["deterministic_checks"]["selected_evidence"] for record in records
+                ),
+                "candidate_must_include_pass": sum(
+                    record["candidate_must_include"] for record in records
                 ),
                 "must_not_primary_violations": sum(
                     not record["deterministic_checks"]["must_not_primary"] for record in records
                 ),
-                "must_include_by_complexity": {
+                "selected_evidence_by_complexity": {
                     complexity: {
                         "passed": sum(
-                            record["deterministic_checks"]["must_include"]
+                            record["deterministic_checks"]["selected_evidence"]
                             for record in records
                             if record["complexity"] == complexity
                         ),

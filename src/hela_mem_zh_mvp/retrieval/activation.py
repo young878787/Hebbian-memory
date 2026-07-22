@@ -31,6 +31,7 @@ def activate(
     max_neighbors_per_node: int,
     path_budget: int,
     alpha: float,
+    min_contribution: float = 0.0,
 ) -> ActivationResult:
     """Expand at most two hops by default, never revisiting a path node.
 
@@ -58,16 +59,40 @@ def activate(
                     continue
                 explored += 1
                 if edge.target_id in visited:
-                    paths.setdefault(edge.target_id, []).append({"depth": depth, "edge_kind": edge.edge_type, "blocked_reason": "cycle_prevented", "provenance": edge.provenance})
+                    paths.setdefault(edge.target_id, []).append(
+                        {
+                            "depth": depth,
+                            "edge_kind": edge.edge_type,
+                            "blocked_reason": "cycle_prevented",
+                            "provenance": edge.provenance,
+                        }
+                    )
                     continue
-                contribution = 0.0 if edge.edge_type == "contradicts" else current_score * edge.weight * alpha
-                step = {"depth": depth, "edge_kind": edge.edge_type, "edge_weight": edge.weight, "provenance": edge.provenance, "contribution": contribution}
+                contribution = (
+                    0.0 if edge.edge_type == "contradicts" else current_score * edge.weight * alpha
+                )
+                step = {
+                    "depth": depth,
+                    "edge_kind": edge.edge_type,
+                    "edge_weight": edge.weight,
+                    "provenance": edge.provenance,
+                    "contribution": contribution,
+                }
                 full_path = [*prior_path, step]
-                paths.setdefault(edge.target_id, []).append({"activation_path": full_path, "path_depth": depth})
+                trace = {"activation_path": full_path, "path_depth": depth}
+                if edge.edge_type != "contradicts" and contribution < min_contribution:
+                    trace["blocked_reason"] = "below_activation_threshold"
+                    paths.setdefault(edge.target_id, []).append(trace)
+                    continue
+                paths.setdefault(edge.target_id, []).append(trace)
                 if contribution:
-                    contributions[edge.target_id] = contributions.get(edge.target_id, 0.0) + contribution
+                    contributions[edge.target_id] = (
+                        contributions.get(edge.target_id, 0.0) + contribution
+                    )
                     if depth < max_depth:
-                        next_frontier.append((edge.target_id, contribution, (*visited, edge.target_id), full_path))
+                        next_frontier.append(
+                            (edge.target_id, contribution, (*visited, edge.target_id), full_path)
+                        )
         frontier = next_frontier
     return ActivationResult(contributions, paths, explored, violations)
 

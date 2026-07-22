@@ -78,6 +78,16 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
         calls.append("resolver")
         return {"decision_actions": {"CREATE": 1}, "candidate_statuses": {"resolved": 1}}
 
+    def fake_database_readback(*args, **kwargs):  # noqa: ANN002, ANN003
+        calls.append("readback")
+        return {
+            "memory_count": 1,
+            "memories_with_evidence": 1,
+            "all_memories_have_evidence": True,
+            "all_evidence_spans_exact": True,
+            "evidence": [],
+        }
+
     class FakeResult:
         items = []
 
@@ -130,6 +140,7 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(single_evaluation, "_purge_namespace", fake_purge)
     monkeypatch.setattr(single_evaluation, "ingest", fake_ingest)
     monkeypatch.setattr(single_evaluation, "_resolver_state", fake_resolver_state)
+    monkeypatch.setattr(single_evaluation, "_database_readback", fake_database_readback)
     monkeypatch.setattr(
         single_evaluation,
         "get_namespace",
@@ -154,6 +165,7 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
         "purge",
         "ingest",
         "resolver",
+        "readback",
         "retrieve",
         "answer",
         "retrieve",
@@ -195,6 +207,7 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
         "retrieval.json",
         "answers.json",
         "judge_input.json",
+        "db_readback.json",
     }
 
 
@@ -229,6 +242,17 @@ def test_single_e2e_keeps_citation_failure_in_judge_batch(monkeypatch, tmp_path:
         single_evaluation,
         "_resolver_state",
         lambda *args, **kwargs: {"decision_actions": {"CREATE": 1}, "candidate_statuses": {}},
+    )
+    monkeypatch.setattr(
+        single_evaluation,
+        "_database_readback",
+        lambda *args, **kwargs: {
+            "memory_count": 1,
+            "memories_with_evidence": 1,
+            "all_memories_have_evidence": True,
+            "all_evidence_spans_exact": True,
+            "evidence": [],
+        },
     )
     monkeypatch.setattr(
         single_evaluation,

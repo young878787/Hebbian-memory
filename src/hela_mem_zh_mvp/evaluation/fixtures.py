@@ -118,7 +118,15 @@ def load_fixture_bundle(directory: str | Path, *, include_edges: bool = False) -
         if edge.source_external_id not in known or edge.target_external_id not in known:
             raise FixtureError("edge endpoint does not exist in character_memories.jsonl")
     for query in queries:
-        if not set(query.must_include + query.nice_to_have + query.must_not_primary) <= known:
+        selected_group_ids = {
+            external_id
+            for group in query.selected_evidence_groups
+            for external_id in group
+        }
+        if not (
+            set(query.must_include + query.nice_to_have + query.must_not_primary)
+            | selected_group_ids
+        ) <= known:
             raise FixtureError(f"query {query.query_id} has an unknown oracle ID")
     if not isinstance(aliases, dict):
         raise FixtureError("aliases.json must be an object")
@@ -196,3 +204,30 @@ def seed_fixtures(
                 metadata=edge.metadata,
             )
     return len(records)
+
+
+def derive_fixture_temporal_relations(session: Session, namespace_id: object) -> int:
+    """Project query-independent session chronology like the live ingestion writer."""
+    memories = session.scalars(
+        select(Memory)
+        .where(Memory.namespace_id == namespace_id, Memory.source_session_id.is_not(None))
+        .order_by(Memory.source_session_id, Memory.occurred_at, Memory.external_id)
+    ).all()
+    count = 0
+    prior_by_session: dict[str, Memory] = {}
+    for memory in memories:
+        prior = prior_by_session.get(memory.source_session_id)
+        if prior is not None:
+            upsert_memory_relation(
+                session,
+                namespace_id,
+                memory.id,
+                prior.id,
+                "temporal",
+                0.25,
+                origin="fixture_runtime_projection",
+                metadata={"derived_from": "source_session_chronology"},
+            )
+            count += 1
+        prior_by_session[memory.source_session_id] = memory
+    return count

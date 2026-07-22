@@ -20,12 +20,12 @@ from ..persistence.models import (
 from ..persistence.models import (
     SourceMessage as StoredSourceMessage,
 )
+from ..persistence.normalization import state_key
 from ..persistence.relations import upsert_memory_relation
 from ..persistence.resolutions import ResolutionApplyError, apply_resolution
 from ..providers.base import StructuredProvider
 from .candidates import ScopedCandidate, find_scoped_candidates
 from .contracts import ExtractedMemory, ResolutionAction, ResolutionDecision
-from .normalization import state_key
 from .resolver import (
     canonical_key,
     resolution_prompt,

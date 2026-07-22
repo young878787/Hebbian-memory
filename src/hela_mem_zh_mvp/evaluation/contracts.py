@@ -71,6 +71,10 @@ class FixtureQuery(BaseModel):
     query: str = Field(min_length=1)
     scope: QueryScope
     must_include: list[str] = Field(default_factory=list)
+    # Final top-k oracle. Every group represents one required semantic facet;
+    # selecting any one memory in each group satisfies that facet. When absent,
+    # must_include remains an exact singleton-per-ID contract.
+    selected_evidence_groups: list[list[str]] = Field(default_factory=list)
     nice_to_have: list[str] = Field(default_factory=list)
     must_not_primary: list[str] = Field(default_factory=list)
     # Primary-source oracle used by the answer judge. Fixture memory IDs only
@@ -108,6 +112,15 @@ class FixtureQuery(BaseModel):
             raise ValueError("oracle IDs must be unique")
         return value
 
+    @field_validator("selected_evidence_groups")
+    @classmethod
+    def valid_selected_evidence_groups(cls, value: list[list[str]]) -> list[list[str]]:
+        if any(not group for group in value):
+            raise ValueError("selected evidence groups cannot be empty")
+        if any(len(group) != len(set(group)) for group in value):
+            raise ValueError("IDs within a selected evidence group must be unique")
+        return value
+
     @field_validator("architecture_targets")
     @classmethod
     def unique_architecture_targets(cls, value: list[str]) -> list[str]:
@@ -121,4 +134,12 @@ class FixtureQuery(BaseModel):
             raise ValueError("architecture_v1 queries require architecture_targets")
         if self.required_hops >= 2 and "multi_hop_activation" not in self.architecture_targets:
             raise ValueError("multi-hop queries must target multi_hop_activation")
+        if self.selected_evidence_groups and not self.expect_answerable:
+            raise ValueError("unanswerable queries cannot require selected evidence groups")
         return self
+
+    def selected_evidence_matches(self, selected: list[str]) -> bool:
+        """Require every semantic facet while allowing declared equivalent evidence."""
+        groups = self.selected_evidence_groups or [[item] for item in self.must_include]
+        selected_ids = set(selected)
+        return all(selected_ids.intersection(group) for group in groups)

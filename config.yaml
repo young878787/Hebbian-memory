@@ -1,5 +1,5 @@
 retrieval:
-  candidate_limit: 20
+  candidate_limit: 60
   seed_top_k: 3
   final_top_k: 5
   semantic_top_k: 3
@@ -8,10 +8,30 @@ retrieval:
   spread_depth: 2
   max_neighbors_per_seed: 5
   path_budget: 40
+  lexical_candidate_limit: 5
+  lexical_seed_limit: 1
+  lexical_bonus: 0.15
+  content_rerank_bonus: 0.50
+  content_rerank_min_overlap: 0.05
+  model_rerank_enabled: true
+  model_rerank_candidate_limit: 40
+  model_rerank_bonus: 1.0
+  min_lexical_term_length: 2
+  min_activation_contribution: 0.01
+  time_decay_memory_types: [event, decision]
+  time_decay_half_life_days: 90
+  time_decay_min_factor: 0.50
   tie_score_tolerance: 1.0e-6
 learning:
   co_retrieval_increment: 0.02
   max_edge_weight: 1.0
+lifecycle:
+  relevance_threshold: 0.08
+  half_life_days: 30
+  recently_cited_days: 30
+  min_idle_days: 30
+  max_edge_weight: 0.20
+  max_activation_count: 2
 resolution:
   candidate_limit: 8
   ambiguous_similarity_min: 0.72

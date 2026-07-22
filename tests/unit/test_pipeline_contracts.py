@@ -66,6 +66,20 @@ def test_fixed_input_is_valid_and_has_stable_ids() -> None:
     assert messages[-1].message_id == "msg-060"
 
 
+def test_semantic_canary_is_an_exact_subset_of_primary_input() -> None:
+    primary = {message.message_id: message for message in load_input_messages()}
+    canary = load_input_messages(Path("data/input/semantic_canary.jsonl"))
+
+    assert [message.message_id for message in canary] == [
+        "msg-003",
+        "msg-004",
+        "msg-045",
+        "msg-046",
+        "msg-050",
+    ]
+    assert all(message == primary[message.message_id] for message in canary)
+
+
 def test_input_rejects_duplicate_message_ids(tmp_path: Path) -> None:
     line = '{"message_id":"m","session_id":"s","role":"user","content":"x","occurred_at":"2026-01-01T00:00:00+08:00","metadata":{}}\n'
     path = tmp_path / "conversations.jsonl"
@@ -206,6 +220,32 @@ def test_answer_error_retains_model_answer_for_evaluation() -> None:
     assert error.value.invalid_citations == ["outside-memory"]
     assert error.value.answer is not None
     assert error.value.answer.citations == ["selected-memory", "outside-memory"]
+
+
+def test_question_memory_cannot_be_promoted_into_supported_fact() -> None:
+    provider = StaticProvider(
+        {
+            "schema_version": "memory-answer-v1",
+            "answerable": True,
+            "answer": "CMP 170HX 可以安全解鎖。",
+            "citations": ["question-memory"],
+        }
+    )
+    item = SimpleNamespace(
+        selected=True,
+        external_id="question-memory",
+        memory=SimpleNamespace(
+            content="使用者想知道 CMP 170HX 是否能安全解鎖。",
+            status="active",
+            modality="question",
+            temporal_scope="current",
+            occurred_at=None,
+        ),
+        activation_path=[],
+    )
+
+    with pytest.raises(AnswerError, match="question memories"):
+        answer_query(provider, "CMP 170HX 能安全解鎖嗎？", SimpleNamespace(items=[item]))
 
 
 def test_outcome_coverage_fails_closed_for_missing_duplicate_and_failed_messages() -> None:

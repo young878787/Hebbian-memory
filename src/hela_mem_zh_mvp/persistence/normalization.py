@@ -1,4 +1,4 @@
-"""Pure, versioned normalization functions used before any memory lookup."""
+"""Pure, versioned normalization for persisted lookup keys."""
 
 from __future__ import annotations
 
@@ -32,7 +32,9 @@ def topic_key(topic_raw: str | None) -> str | None:
     if topic_raw is None or not topic_raw.strip():
         return None
     key = normalize_lookup(topic_raw)
-    return _TOPIC_OVERRIDES.get(key, re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "_", key).strip("_") or key)
+    return _TOPIC_OVERRIDES.get(
+        key, re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "_", key).strip("_") or key
+    )
 
 
 def state_key(

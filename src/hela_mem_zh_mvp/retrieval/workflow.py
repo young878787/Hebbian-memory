@@ -42,7 +42,7 @@ def ask(
     learn: bool = False,
 ) -> dict[str, Any]:
     namespace = get_namespace(session, namespace_key, create=False)
-    result = Retriever(session, config, embeddings).retrieve(
+    result = Retriever(session, config, embeddings, provider).retrieve(
         namespace.id,
         query,
         RetrievalMode.HEBBIAN,

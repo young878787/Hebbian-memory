@@ -98,6 +98,39 @@ def test_fixture_query_requires_explicit_architecture_labels() -> None:
         )
 
 
+def test_selected_evidence_groups_require_every_semantic_facet() -> None:
+    query = FixtureQuery.model_validate(
+        {
+            "query_id": "equivalent-evidence",
+            "query": "問題",
+            "scope": "general",
+            "must_include": ["M1", "M3"],
+            "selected_evidence_groups": [["M1", "M2"], ["M3", "M4"]],
+            "expect_answerable": True,
+            "category": "test",
+        }
+    )
+
+    assert query.selected_evidence_matches(["M2", "M4"])
+    assert not query.selected_evidence_matches(["M1", "M2"])
+
+
+def test_selected_evidence_defaults_to_exact_must_include_contract() -> None:
+    query = FixtureQuery.model_validate(
+        {
+            "query_id": "exact-evidence",
+            "query": "問題",
+            "scope": "general",
+            "must_include": ["M1", "M2"],
+            "expect_answerable": True,
+            "category": "test",
+        }
+    )
+
+    assert query.selected_evidence_matches(["M1", "M2"])
+    assert not query.selected_evidence_matches(["M1"])
+
+
 def test_judge_oracle_is_directly_mapped_to_input_conversations() -> None:
     bundle = load_fixture_bundle("data/fixtures")
     query = next(item for item in bundle.queries if item.query_id == "Q_CROSS_DOMAIN_02")

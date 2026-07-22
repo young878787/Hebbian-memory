@@ -18,8 +18,10 @@ from ..ingestion.workflow import ingest
 from ..persistence.models import (
     Memory,
     MemoryCandidate,
+    MemoryEvidence,
     MemoryNamespace,
     MemoryRelation,
+    SourceMessage,
 )
 from ..persistence.namespaces import get_namespace, purge_namespace
 from ..providers.base import StructuredProvider
@@ -99,6 +101,59 @@ def _resolver_state(session: Session, namespace_key: str) -> dict[str, Any]:
             )
         ),
         "candidate_statuses": dict(Counter(candidate.status for candidate in candidates)),
+    }
+
+
+def _database_readback(session: Session, namespace_key: str) -> dict[str, Any]:
+    """Capture exact evidence and semantic fields before temporary teardown."""
+    namespace = get_namespace(session, namespace_key, create=False)
+    rows = session.execute(
+        select(Memory, MemoryEvidence, SourceMessage)
+        .join(
+            MemoryEvidence,
+            (MemoryEvidence.namespace_id == Memory.namespace_id)
+            & (MemoryEvidence.memory_id == Memory.id),
+        )
+        .join(
+            SourceMessage,
+            (SourceMessage.namespace_id == MemoryEvidence.namespace_id)
+            & (SourceMessage.message_id == MemoryEvidence.source_message_id),
+        )
+        .where(Memory.namespace_id == namespace.id)
+        .order_by(Memory.external_id, MemoryEvidence.source_message_id)
+    ).all()
+    evidence = []
+    memory_ids = set()
+    for memory, item, source in rows:
+        exact_span = (
+            item.evidence_start is not None
+            and item.evidence_end is not None
+            and source.content[item.evidence_start : item.evidence_end] == item.evidence_text
+        )
+        memory_ids.add(memory.id)
+        evidence.append(
+            {
+                "external_id": memory.external_id,
+                "memory_type": memory.memory_type,
+                "status": memory.status,
+                "modality": memory.modality,
+                "temporal_scope": memory.temporal_scope,
+                "source_message_id": item.source_message_id,
+                "evidence_text": item.evidence_text,
+                "evidence_start": item.evidence_start,
+                "evidence_end": item.evidence_end,
+                "exact_span": exact_span,
+            }
+        )
+    memory_count = session.scalar(
+        select(func.count()).select_from(Memory).where(Memory.namespace_id == namespace.id)
+    ) or 0
+    return {
+        "memory_count": memory_count,
+        "memories_with_evidence": len(memory_ids),
+        "all_memories_have_evidence": len(memory_ids) == memory_count,
+        "all_evidence_spans_exact": bool(evidence) and all(item["exact_span"] for item in evidence),
+        "evidence": evidence,
     }
 
 
@@ -211,8 +266,13 @@ def run_single_e2e_evaluation(
         payload["ingestion"] = ingestion
         resolver = _resolver_state(session, namespace_key)
         payload["resolver"] = resolver
+        database_readback = _database_readback(session, namespace_key)
+        payload["database_readback"] = {
+            key: value for key, value in database_readback.items() if key != "evidence"
+        }
+        _write_artifact("db_readback.json", database_readback)
         namespace = get_namespace(session, namespace_key, create=False)
-        retriever = Retriever(session, config, embeddings)
+        retriever = Retriever(session, config, embeddings, provider)
         for query_index, fixture_query in enumerate(queries):
             result = retriever.retrieve(
                 namespace.id,
@@ -289,6 +349,8 @@ def run_single_e2e_evaluation(
         checks = {
             "extraction_coverage": ingestion["coverage_pass"],
             "resolver_decision_persisted": bool(resolver["decision_actions"]),
+            "all_memories_have_evidence": database_readback["all_memories_have_evidence"],
+            "all_evidence_spans_exact": database_readback["all_evidence_spans_exact"],
             "all_queries_completed": len(records) == len(queries),
             "all_answers_returned": all(record["answer"] is not None for record in records),
             "all_citations_selected": all(
@@ -347,6 +409,7 @@ def run_single_e2e_evaluation(
                     "retrieval": "results/pipeline/retrieval.json",
                     "answers": "results/pipeline/answers.json",
                     "judge_input": "results/pipeline/judge_input.json",
+                    "db_readback": "results/pipeline/db_readback.json",
                 },
             }
         )

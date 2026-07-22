@@ -39,6 +39,7 @@ def _evaluate_mode(
         result = retriever.retrieve(
             namespace.id, fixture_query.query, mode, fixture_query.scope, run_mode
         )
+        candidates = [item.external_id for item in result.items]
         selected = [item.external_id for item in result.items if item.selected]
         records.append(
             {
@@ -46,7 +47,9 @@ def _evaluate_mode(
                 "query": fixture_query.query,
                 "scope": fixture_query.scope.value,
                 "selected_external_ids": selected,
+                "candidate_external_ids": candidates,
                 "must_include": fixture_query.must_include,
+                "selected_evidence_groups": fixture_query.selected_evidence_groups,
                 "nice_to_have": fixture_query.nice_to_have,
                 "must_not_primary": fixture_query.must_not_primary,
                 "expect_answerable": fixture_query.expect_answerable,
@@ -55,7 +58,8 @@ def _evaluate_mode(
                 "complexity": fixture_query.complexity,
                 "architecture_targets": fixture_query.architecture_targets,
                 "required_hops": fixture_query.required_hops,
-                "must_include_hit": set(fixture_query.must_include) <= set(selected),
+                "selected_evidence_hit": fixture_query.selected_evidence_matches(selected),
+                "candidate_must_include_hit": set(fixture_query.must_include) <= set(candidates),
                 "result": result.as_dict(),
                 "manual_scores": {
                     "association_completeness": None,
@@ -92,6 +96,7 @@ def evaluate(
             ],
         },
         "quality_gate": {"status": "pending_manual_scoring"},
+        "config_snapshot": config.snapshot(),
         "coverage": {
             "query_count": len(bundle.queries),
             "by_suite": {
@@ -110,19 +115,27 @@ def evaluate(
             },
             "multi_hop_queries": sum(query.required_hops >= 2 for query in bundle.queries),
         },
-        "embedding_only_must_include_hits": sum(
-            record["must_include_hit"] for record in embedding_only
+        "embedding_only_selected_evidence_hits": sum(
+            record["selected_evidence_hit"] for record in embedding_only
         ),
-        "hebbian_must_include_hits": sum(record["must_include_hit"] for record in hebbian),
-        "must_include_hits_by_complexity": {
+        "hebbian_selected_evidence_hits": sum(
+            record["selected_evidence_hit"] for record in hebbian
+        ),
+        "embedding_only_candidate_must_include_hits": sum(
+            record["candidate_must_include_hit"] for record in embedding_only
+        ),
+        "hebbian_candidate_must_include_hits": sum(
+            record["candidate_must_include_hit"] for record in hebbian
+        ),
+        "selected_evidence_hits_by_complexity": {
             complexity: {
                 "embedding_only": sum(
-                    record["must_include_hit"]
+                    record["selected_evidence_hit"]
                     for record in embedding_only
                     if record["complexity"] == complexity
                 ),
                 "hebbian": sum(
-                    record["must_include_hit"]
+                    record["selected_evidence_hit"]
                     for record in hebbian
                     if record["complexity"] == complexity
                 ),

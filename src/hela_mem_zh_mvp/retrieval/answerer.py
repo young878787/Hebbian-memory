@@ -68,6 +68,14 @@ def answer_query(provider: StructuredProvider, query: str, result: RetrievalResu
             answer=answer,
             invalid_citations=invalid_citations,
         )
+    cited = {item.external_id: item for item in selected if item.external_id in answer.citations}
+    if answer.answerable and cited and all(
+        item.memory.modality == "question" for item in cited.values()
+    ):
+        raise AnswerError(
+            "question memories cannot be promoted into a supported fact",
+            answer=answer,
+        )
     return answer
 
 

@@ -21,13 +21,41 @@ class RetrievalConfig(BaseModel):
     spread_depth: int = Field(ge=1, le=3)
     max_neighbors_per_seed: int = Field(ge=1)
     path_budget: int = Field(default=40, ge=1)
+    lexical_candidate_limit: int = Field(default=5, ge=1)
+    lexical_seed_limit: int = Field(default=1, ge=0)
+    lexical_bonus: float = Field(default=0.15, gt=0, le=1)
+    content_rerank_bonus: float = Field(default=0.50, ge=0, le=1)
+    content_rerank_min_overlap: float = Field(default=0.05, ge=0, le=1)
+    model_rerank_enabled: bool = True
+    model_rerank_candidate_limit: int = Field(default=40, ge=1)
+    model_rerank_bonus: float = Field(default=1.0, gt=0, le=2)
+    min_lexical_term_length: int = Field(default=2, ge=1)
+    min_activation_contribution: float = Field(default=0.01, ge=0, le=1)
+    time_decay_memory_types: tuple[str, ...] = ("event", "decision")
+    time_decay_half_life_days: float = Field(default=90, gt=0)
+    time_decay_min_factor: float = Field(default=0.5, gt=0, le=1)
     tie_score_tolerance: float = Field(gt=0)
 
     @model_validator(mode="after")
     def check_budget(self) -> RetrievalConfig:
         if self.seed_top_k > self.final_top_k:
             raise ValueError("seed_top_k cannot exceed final_top_k")
+        if self.lexical_seed_limit > self.seed_top_k:
+            raise ValueError("lexical_seed_limit cannot exceed seed_top_k")
+        allowed_types = {"character_fact", "event", "preference", "decision"}
+        if not set(self.time_decay_memory_types) <= allowed_types:
+            raise ValueError("time_decay_memory_types contains an unknown memory type")
         return self
+
+
+class LifecycleConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    relevance_threshold: float = Field(default=0.08, ge=0, le=1)
+    half_life_days: float = Field(default=30, gt=0)
+    recently_cited_days: int = Field(default=30, ge=0)
+    min_idle_days: int = Field(default=30, ge=0)
+    max_edge_weight: float = Field(default=0.2, ge=0, le=1)
+    max_activation_count: int = Field(default=2, ge=0)
 
 
 class LearningConfig(BaseModel):
@@ -70,6 +98,7 @@ class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     retrieval: RetrievalConfig
     learning: LearningConfig
+    lifecycle: LifecycleConfig
     resolution: ResolutionConfig
     evaluation: EvaluationConfig
     status_adjustments: dict[str, dict[str, float]]

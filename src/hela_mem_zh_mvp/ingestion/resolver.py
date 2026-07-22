@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session
 
 from ..config import ResolutionConfig
 from ..persistence.models import Memory
+from ..persistence.normalization import normalize_lookup
 from .candidates import ScopedCandidate
 from .contracts import EffectiveOrder, ExtractedMemory, ResolutionAction, ResolutionDecision
-from .normalization import normalize_lookup
 
 
 def canonical_key(content: str, memory_type: str) -> str:

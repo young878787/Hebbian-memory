@@ -8,10 +8,10 @@ from hela_mem_zh_mvp.ingestion.contracts import (
     ResolutionAction,
     ResolutionDecision,
 )
-from hela_mem_zh_mvp.ingestion.normalization import normalize_lookup, state_key, topic_key
 from hela_mem_zh_mvp.ingestion.resolver import validate_ai_decision
 from hela_mem_zh_mvp.ingestion.service import _resolution_topic_key
 from hela_mem_zh_mvp.persistence.models import Entity
+from hela_mem_zh_mvp.persistence.normalization import normalize_lookup, state_key, topic_key
 
 
 def _config() -> ResolutionConfig:

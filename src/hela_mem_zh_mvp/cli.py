@@ -179,7 +179,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "lifecycle-report":
             with _database_session(require_google=False) as session:
                 namespace = get_namespace(session, args.namespace, create=False)
-                _print_json(lifecycle_report(session, namespace.id, now=datetime.now(UTC)))
+                _print_json(
+                    lifecycle_report(
+                        session,
+                        namespace.id,
+                        now=datetime.now(UTC),
+                        config=load_config().lifecycle,
+                    )
+                )
         elif args.command == "rebuild-graph":
             with _database_session(require_google=False) as session:
                 namespace = get_namespace(session, args.namespace, create=False)
