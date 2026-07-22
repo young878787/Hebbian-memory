@@ -5,7 +5,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from ..config import LearningConfig
-from ..persistence.associations import record_cited_together
+from ..persistence.associations import reinforce_associations
 
 
 def reinforce_co_retrieval(
@@ -14,17 +14,17 @@ def reinforce_co_retrieval(
     memory_ids: list[UUID],
     learning: LearningConfig,
     *,
-    retrieval_run_id: UUID,
+    learning_token: str,
     citations: list[str],
 ) -> int:
     """Append idempotent events after the answer/citation contract has passed."""
-    return record_cited_together(
+    return reinforce_associations(
         session,
         namespace_id,
         memory_ids,
-        retrieval_run_id,
-        learning.co_retrieval_increment,
-        citations,
+        learning_token=learning_token,
+        increment=learning.co_retrieval_increment,
+        citations=citations,
     )
 
 

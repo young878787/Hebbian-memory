@@ -5,6 +5,7 @@ from hela_mem_zh_mvp.cli import build_parser
 from hela_mem_zh_mvp.evaluation import single_e2e as single_evaluation
 from hela_mem_zh_mvp.evaluation import standard as standard_evaluation
 from hela_mem_zh_mvp.evaluation.reporting import build_qa_section, build_question_results
+from hela_mem_zh_mvp.retrieval.answerer import AnswerError
 
 
 def test_single_e2e_cli_accepts_batch_and_one_case_overrides() -> None:
@@ -167,6 +168,7 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
         "completed": 2,
         "answers_returned": 2,
         "provider_errors": 0,
+        "answer_contract_errors": 0,
     }
     assert summary["coverage"] == {
         "by_suite": {"baseline": 2, "architecture_v1": 0},
@@ -193,6 +195,117 @@ def test_single_e2e_runs_batch_and_persists_artifacts(monkeypatch, tmp_path: Pat
         "retrieval.json",
         "answers.json",
         "judge_input.json",
+    }
+
+
+def test_single_e2e_keeps_citation_failure_in_judge_batch(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(single_evaluation, "RESULTS_DIRECTORY", tmp_path)
+    monkeypatch.setattr(single_evaluation, "SUMMARY_PATH", tmp_path / "root-summary.json")
+    monkeypatch.setattr(single_evaluation, "load_input_messages", lambda path: [object()])
+    query = SimpleNamespace(
+        query_id="citation-failure",
+        query="問題",
+        category="test",
+        suite="baseline",
+        complexity="basic",
+        architecture_targets=[],
+        required_hops=0,
+        scope=SimpleNamespace(value="general"),
+        expect_answerable=True,
+        reference_message_ids=[],
+    )
+    monkeypatch.setattr(single_evaluation, "_evaluation_queries", lambda *args: [query])
+    monkeypatch.setattr(
+        single_evaluation,
+        "_purge_namespace",
+        lambda *args, **kwargs: {"before": {}, "removed": True, "namespace_exists_after": False},
+    )
+    monkeypatch.setattr(
+        single_evaluation,
+        "ingest",
+        lambda *args, **kwargs: {"messages": 1, "created": 1, "merged": 0, "coverage_pass": True},
+    )
+    monkeypatch.setattr(
+        single_evaluation,
+        "_resolver_state",
+        lambda *args, **kwargs: {"decision_actions": {"CREATE": 1}, "candidate_statuses": {}},
+    )
+    monkeypatch.setattr(
+        single_evaluation,
+        "get_namespace",
+        lambda *args, **kwargs: SimpleNamespace(id="namespace-id"),
+    )
+
+    class FakeResult:
+        items = []
+
+        def as_dict(self):
+            return {
+                "items": [
+                    {
+                        "external_id": "selected-memory",
+                        "content": "記憶",
+                        "status": "active",
+                        "selected": True,
+                    }
+                ]
+            }
+
+    class FakeRetriever:
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ARG002
+            pass
+
+        def retrieve(self, *args, **kwargs):  # noqa: ANN002, ARG002
+            return FakeResult()
+
+    monkeypatch.setattr(single_evaluation, "Retriever", FakeRetriever)
+    partial_answer = {
+        "schema_version": "memory-answer-v1",
+        "answerable": True,
+        "answer": "有。",
+        "citations": ["selected-memory", "outside-memory"],
+    }
+
+    def fake_answer(*args, **kwargs):  # noqa: ANN002, ARG002
+        raise AnswerError(
+            "answer cites a memory that was not selected",
+            answer=SimpleNamespace(model_dump=lambda: partial_answer),
+            invalid_citations=["outside-memory"],
+        )
+
+    def fake_judge(*args, **kwargs):  # noqa: ANN002, ARG002
+        assert len(args[1]) == 1
+        assert args[1][0]["answer"] == partial_answer
+        return {
+            "status": "PASS",
+            "pass_count": 1,
+            "fail_count": 0,
+            "unsure_count": 0,
+            "cases": [{"query_id": "citation-failure", "verdict": "PASS", "reason": "可檢視"}],
+            "summary": {},
+        }
+
+    monkeypatch.setattr(single_evaluation, "answer_query", fake_answer)
+    monkeypatch.setattr(single_evaluation, "judge_answers", fake_judge)
+
+    summary = single_evaluation.run_single_e2e_evaluation(
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(),
+        SimpleNamespace(evaluation=SimpleNamespace(answer_request_interval_seconds=0)),
+        extractor_model="test-model",
+        input_path=Path("input.jsonl"),
+        query_limit=1,
+    )
+
+    assert summary["status"] == "FAIL"
+    assert summary["checks"]["all_citations_selected"] is False
+    assert summary["questions"] == {
+        "requested": 1,
+        "completed": 1,
+        "answers_returned": 1,
+        "provider_errors": 0,
+        "answer_contract_errors": 1,
     }
 
 

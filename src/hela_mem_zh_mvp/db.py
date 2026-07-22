@@ -7,25 +7,29 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .settings import EXPECTED_DATABASE, Settings
 
-CANONICAL_ARCHITECTURE_REVISION = "20260721_0007"
+CANONICAL_ARCHITECTURE_REVISION = "20260722_0008"
 CANONICAL_ARCHITECTURE_TABLES = frozenset(
     {
-        "memory_claims",
-        "claim_evidence",
-        "relation_evidence",
-        "association_events",
-        "association_stats",
-        "lifecycle_decisions",
-        "graph_projection_runs",
-        "graph_projection_nodes",
-        "graph_projection_edges",
-        "message_extraction_outcomes",
+        "memory_namespaces",
+        "source_messages",
+        "ingestion_runs",
+        "entities",
+        "entity_aliases",
+        "memories",
+        "memory_evidence",
+        "memory_entities",
+        "memory_candidates",
+        "memory_relations",
+        "memory_associations",
     }
 )
 CANONICAL_ARCHITECTURE_COLUMNS = {
     "memories": {"modality", "temporal_scope"},
-    "memory_claims": {"modality", "temporal_scope"},
-    "claim_evidence": {"evidence_start", "evidence_end"},
+    "ingestion_runs": {"extraction_outcomes"},
+    "memory_candidates": {"latest_decision"},
+    "memory_evidence": {"memory_id", "evidence_start", "evidence_end"},
+    "memory_relations": {"relation_type", "origin", "evidence_refs"},
+    "memory_associations": {"last_learning_token", "policy_version"},
 }
 
 

@@ -1,44 +1,74 @@
-"""Evidence-backed factual relation ledger; never accepts learning origins."""
+"""Single-writer persistence for factual, temporal, and derived relations."""
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
-from .models import MemoryClaim, RelationEvidence
+from ..ingestion.contracts import EdgeType
+from .models import MemoryRelation
 
-FACTUAL_RELATIONS = {"supports", "contradicts", "supersedes", "temporal"}
 
-
-def append_relation_evidence(
+def upsert_memory_relation(
     session: Session,
+    namespace_id: UUID,
+    source_id: UUID,
+    target_id: UUID,
+    relation_type: EdgeType | str,
+    weight: float,
     *,
-    namespace_id: object,
-    source_claim: MemoryClaim,
-    target_claim: MemoryClaim,
-    relation_type: str,
     origin: str,
-    evidence_refs: list[str],
     confidence: float = 1.0,
-) -> RelationEvidence:
-    if relation_type not in FACTUAL_RELATIONS:
-        raise ValueError(f"unsupported factual relation {relation_type!r}")
-    if origin in {"co_retrieval", "association", "learning"}:
-        raise ValueError("association learning cannot create factual relation evidence")
-    if source_claim.namespace_id != namespace_id or target_claim.namespace_id != namespace_id:
-        raise ValueError("relation evidence cannot cross namespace")
-    if source_claim.id == target_claim.id:
-        raise ValueError("relation evidence cannot self-link")
-    relation = RelationEvidence(
-        namespace_id=namespace_id,
-        source_claim_id=source_claim.id,
-        target_claim_id=target_claim.id,
-        relation_type=relation_type,
-        origin=origin,
-        evidence_refs=evidence_refs,
-        confidence=confidence,
-    )
-    session.add(relation)
+    evidence_refs: list[str] | None = None,
+    metadata: dict[str, object] | None = None,
+) -> MemoryRelation:
+    relation_value = relation_type.value if isinstance(relation_type, EdgeType) else relation_type
+    if relation_value == EdgeType.CO_RETRIEVAL.value:
+        raise ValueError("co-retrieval learning belongs in memory_associations")
+    if source_id == target_id:
+        raise ValueError("memory relation cannot self-link")
+    source, target = source_id, target_id
+    if relation_value in {EdgeType.SEMANTIC.value, EdgeType.CONTRADICTS.value}:
+        source, target = sorted((source_id, target_id), key=str)
+    relation = session.get(MemoryRelation, (namespace_id, source, target, relation_value))
+    if relation is None:
+        relation = MemoryRelation(
+            namespace_id=namespace_id,
+            source_id=source,
+            target_id=target,
+            relation_type=relation_value,
+            weight=weight,
+            origin=origin,
+            confidence=confidence,
+            evidence_refs=list(dict.fromkeys(evidence_refs or [])),
+            metadata_=metadata or {},
+        )
+        session.add(relation)
+    else:
+        relation.weight = max(relation.weight, weight)
+        relation.confidence = max(relation.confidence, confidence)
+        relation.evidence_refs = list(
+            dict.fromkeys([*(relation.evidence_refs or []), *(evidence_refs or [])])
+        )
+        relation.metadata_ = {**(relation.metadata_ or {}), **(metadata or {})}
     return relation
 
 
-__all__ = ["FACTUAL_RELATIONS", "append_relation_evidence"]
+def relation_weight(
+    session: Session,
+    namespace_id: UUID,
+    source_id: UUID,
+    target_id: UUID,
+    relation_type: EdgeType,
+) -> float | None:
+    source, target = source_id, target_id
+    if relation_type in {EdgeType.SEMANTIC, EdgeType.CONTRADICTS}:
+        source, target = sorted((source_id, target_id), key=str)
+    relation = session.get(
+        MemoryRelation, (namespace_id, source, target, relation_type.value)
+    )
+    return relation.weight if relation is not None else None
+
+
+__all__ = ["relation_weight", "upsert_memory_relation"]

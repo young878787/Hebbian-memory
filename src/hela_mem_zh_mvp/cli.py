@@ -27,7 +27,6 @@ from .evaluation.standard import evaluate
 from .graph.projection import rebuild_projection
 from .ingestion.workflow import ingest
 from .lifecycle.workflow import lifecycle_report
-from .persistence.backfill import canonical_backfill_report
 from .persistence.namespaces import get_namespace
 from .persistence.resolution_reports import resolution_report
 from .providers.embedding import EmbeddingClient
@@ -105,8 +104,6 @@ def build_parser() -> argparse.ArgumentParser:
     backfill = commands.add_parser("backfill-resolution")
     backfill.add_argument("--namespace", required=True)
     backfill.add_argument("--report-only", action="store_true", default=True)
-    architecture_backfill = commands.add_parser("architecture-backfill")
-    architecture_backfill.add_argument("--namespace", required=True)
     lifecycle = commands.add_parser("lifecycle-report")
     lifecycle.add_argument("--namespace", required=True)
     graph = commands.add_parser("rebuild-graph")
@@ -179,9 +176,6 @@ def main(argv: list[str] | None = None) -> int:
                 )
             with _database_session(require_google=False) as session:
                 _print_json(resolution_report(session, args.namespace))
-        elif args.command == "architecture-backfill":
-            with _database_session(require_google=False) as session:
-                _print_json(canonical_backfill_report(session, args.namespace))
         elif args.command == "lifecycle-report":
             with _database_session(require_google=False) as session:
                 namespace = get_namespace(session, args.namespace, create=False)
@@ -189,8 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "rebuild-graph":
             with _database_session(require_google=False) as session:
                 namespace = get_namespace(session, args.namespace, create=False)
-                with session.begin():
-                    _print_json(rebuild_projection(session, namespace.id, load_config().snapshot()))
+                _print_json(rebuild_projection(session, namespace.id, load_config().snapshot()))
         return 0
     except ValueError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)

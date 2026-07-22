@@ -4,7 +4,6 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 from hela_mem_zh_mvp.config import load_config
-from hela_mem_zh_mvp.retrieval import service as retrieval_service
 from hela_mem_zh_mvp.retrieval.contracts import QueryScope, RankedMemory, RetrievalMode, RunMode
 from hela_mem_zh_mvp.retrieval.service import Retriever
 
@@ -48,26 +47,14 @@ def test_hebbian_selects_contradiction_context_without_positive_bonus() -> None:
     assert bonus.selected
 
 
-def test_retrieve_commits_after_persisting_run_trace(monkeypatch) -> None:
+def test_retrieve_returns_trace_without_database_persistence() -> None:
     session = Mock()
     item = _item("M1", 0.9)
-    run = SimpleNamespace(id=uuid4())
-    events: list[str] = []
-
-    def create_run(*args, **kwargs):
-        events.append("run")
-        return run
-
-    def create_items(*args, **kwargs):
-        assert not session.commit.called
-        events.append("items")
 
     class StubRetriever(Retriever):
         def _semantic_candidates(self, namespace_id, query_embedding):
             return [item]
 
-    monkeypatch.setattr(retrieval_service, "create_retrieval_run", create_run)
-    monkeypatch.setattr(retrieval_service, "create_retrieval_items", create_items)
     result = StubRetriever(
         session,
         load_config(),
@@ -80,6 +67,5 @@ def test_retrieve_commits_after_persisting_run_trace(monkeypatch) -> None:
         RunMode.EVALUATION,
     )
 
-    assert events == ["run", "items"]
-    session.commit.assert_called_once_with()
-    assert result.run_id == run.id
+    session.commit.assert_not_called()
+    assert result.run_id is not None

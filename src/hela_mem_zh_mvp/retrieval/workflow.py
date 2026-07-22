@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import uuid
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -14,6 +17,18 @@ from .answerer import answer_query
 from .contracts import QueryScope, RetrievalMode, RunMode
 from .learning import reinforce_co_retrieval
 from .service import Retriever
+
+RESULTS_DIRECTORY = Path("results/ask")
+
+
+def _write_retrieval_artifact(payload: dict[str, Any]) -> None:
+    RESULTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    path = RESULTS_DIRECTORY / "retrieval.json"
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+    temporary.replace(path)
 
 
 def ask(
@@ -43,8 +58,10 @@ def ask(
             namespace.id,
             cited_ids,
             config.learning,
-            retrieval_run_id=result.run_id,
+            learning_token=str(result.run_id),
             citations=answer.citations,
         )
         session.commit()
-    return {"retrieval": result.as_dict(), "answer": answer.model_dump()}
+    payload = {"retrieval": result.as_dict(), "answer": answer.model_dump()}
+    _write_retrieval_artifact(payload)
+    return payload

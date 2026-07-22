@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,7 @@ from hela_mem_zh_mvp.ingestion.contracts import (
 from hela_mem_zh_mvp.ingestion.extractor import extract_messages
 from hela_mem_zh_mvp.ingestion.input import IngestionError, load_input_messages
 from hela_mem_zh_mvp.ingestion.state import derive_initial_state
+from hela_mem_zh_mvp.retrieval.answerer import AnswerError, answer_query
 from hela_mem_zh_mvp.retrieval.contracts import AnswerResult
 
 
@@ -172,6 +174,38 @@ def test_extractor_replaces_all_provider_evidence_with_primary_source() -> None:
 def test_answer_contract_requires_selected_citations() -> None:
     with pytest.raises(ValueError, match="citation"):
         AnswerResult(schema_version="memory-answer-v1", answerable=True, answer="有。")
+
+
+def test_answer_error_retains_model_answer_for_evaluation() -> None:
+    provider = StaticProvider(
+        {
+            "schema_version": "memory-answer-v1",
+            "answerable": True,
+            "answer": "使用者喜歡散步。",
+            "citations": ["selected-memory", "outside-memory"],
+        }
+    )
+    memory = SimpleNamespace(
+        content="使用者喜歡散步。",
+        status="active",
+        modality="asserted",
+        temporal_scope="current",
+        occurred_at=None,
+    )
+    item = SimpleNamespace(
+        selected=True,
+        external_id="selected-memory",
+        memory=memory,
+        activation_path=[],
+    )
+    result = SimpleNamespace(items=[item])
+
+    with pytest.raises(AnswerError) as error:
+        answer_query(provider, "我平常喜歡什麼？", result)
+
+    assert error.value.invalid_citations == ["outside-memory"]
+    assert error.value.answer is not None
+    assert error.value.answer.citations == ["selected-memory", "outside-memory"]
 
 
 def test_outcome_coverage_fails_closed_for_missing_duplicate_and_failed_messages() -> None:

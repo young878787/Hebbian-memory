@@ -1,29 +1,34 @@
 import pytest
 
 from hela_mem_zh_mvp.persistence.models import (
-    AssociationEvent,
-    AssociationStat,
-    ClaimEvidence,
     Entity,
     EntityAlias,
-    GraphProjectionEdge,
-    GraphProjectionNode,
-    GraphProjectionRun,
     IngestionRun,
-    LifecycleDecision,
     Memory,
+    MemoryAssociation,
     MemoryCandidate,
-    MemoryClaim,
-    MemoryEdge,
     MemoryEntity,
+    MemoryEvidence,
     MemoryNamespace,
-    MemoryResolutionDecision,
-    MessageExtractionOutcome,
-    RelationEvidence,
-    RetrievalItem,
-    RetrievalRun,
+    MemoryRelation,
     SourceMessage,
 )
+
+
+def test_converged_schema_has_exactly_eleven_application_tables() -> None:
+    assert set(Memory.metadata.tables) == {
+        "memory_namespaces",
+        "source_messages",
+        "ingestion_runs",
+        "entities",
+        "entity_aliases",
+        "memories",
+        "memory_evidence",
+        "memory_entities",
+        "memory_candidates",
+        "memory_relations",
+        "memory_associations",
+    }
 
 
 def test_memory_entity_lookup_uses_its_declared_primary_key() -> None:
@@ -33,31 +38,32 @@ def test_memory_entity_lookup_uses_its_declared_primary_key() -> None:
     ]
 
 
-def test_claim_namespace_composite_key_supports_namespace_scoped_foreign_keys() -> None:
-    constraints = {
-        tuple(column.name for column in constraint.columns)
-        for constraint in MemoryClaim.__table__.constraints
-        if constraint.__class__.__name__ == "UniqueConstraint"
-    }
-    assert ("namespace_id", "id") in constraints
+def test_run_and_candidate_own_latest_operational_state() -> None:
+    assert IngestionRun.__table__.c.extraction_outcomes.nullable is False
+    assert MemoryCandidate.__table__.c.latest_decision.nullable is False
 
 
-def test_message_outcome_is_scoped_to_run_and_source_message() -> None:
-    constraints = {
-        tuple(column.name for column in constraint.columns)
-        for constraint in MessageExtractionOutcome.__table__.constraints
-        if constraint.__class__.__name__ == "UniqueConstraint"
-    }
-    assert ("ingestion_run_id", "source_message_id") in constraints
+def test_evidence_and_relation_reference_canonical_memory_directly() -> None:
+    evidence_fks = {fk.target_fullname for fk in MemoryEvidence.__table__.foreign_keys}
+    relation_fks = {fk.target_fullname for fk in MemoryRelation.__table__.foreign_keys}
+    assert "memories.id" in evidence_fks
+    assert relation_fks == {"memories.namespace_id", "memories.id"}
 
 
 @pytest.mark.parametrize(
     "model",
     [
-        MemoryNamespace, SourceMessage, IngestionRun, MessageExtractionOutcome, Entity, EntityAlias, Memory, MemoryEntity,
-        MemoryCandidate, MemoryResolutionDecision, MemoryEdge, RetrievalRun, RetrievalItem,
-        MemoryClaim, ClaimEvidence, RelationEvidence, AssociationEvent, AssociationStat,
-        LifecycleDecision, GraphProjectionRun, GraphProjectionNode, GraphProjectionEdge,
+        MemoryNamespace,
+        SourceMessage,
+        IngestionRun,
+        Entity,
+        EntityAlias,
+        Memory,
+        MemoryEvidence,
+        MemoryEntity,
+        MemoryCandidate,
+        MemoryRelation,
+        MemoryAssociation,
     ],
 )
 def test_pipeline_models_have_database_backed_audit_timestamps(model: type[object]) -> None:

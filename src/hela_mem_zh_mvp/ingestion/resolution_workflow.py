@@ -9,19 +9,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import ResolutionConfig
-from ..persistence.claims import ensure_claim, sync_claim_view
+from ..persistence.evidence import ensure_memory_evidence
 from ..persistence.models import (
     IngestionRun,
-    LifecycleDecision,
     Memory,
     MemoryCandidate,
     MemoryEntity,
-    MemoryResolutionDecision,
+    MemoryEvidence,
 )
 from ..persistence.models import (
     SourceMessage as StoredSourceMessage,
 )
-from ..persistence.relations import append_relation_evidence
+from ..persistence.relations import upsert_memory_relation
 from ..persistence.resolutions import ResolutionApplyError, apply_resolution
 from ..providers.base import StructuredProvider
 from .candidates import ScopedCandidate, find_scoped_candidates
@@ -65,7 +64,9 @@ def _candidate_snapshot(candidate: ExtractedMemory) -> dict[str, object]:
     }
 
 
-def _target_snapshot(scoped: list[ScopedCandidate]) -> tuple[list[dict[str, object]], dict[str, Memory]]:
+def _target_snapshot(
+    session: Session, scoped: list[ScopedCandidate]
+) -> tuple[list[dict[str, object]], dict[str, Memory]]:
     target_by_ref: dict[str, Memory] = {}
     snapshot: list[dict[str, object]] = []
     for index, item in enumerate(scoped, start=1):
@@ -83,7 +84,13 @@ def _target_snapshot(scoped: list[ScopedCandidate]) -> tuple[list[dict[str, obje
                 "occurred_at": item.memory.occurred_at.isoformat()
                 if item.memory.occurred_at
                 else None,
-                "evidence_message_ids": item.memory.source_message_ids or [],
+                "evidence_message_ids": list(
+                    session.scalars(
+                        select(MemoryEvidence.source_message_id).where(
+                            MemoryEvidence.memory_id == item.memory.id
+                        )
+                    ).all()
+                ),
                 "similarity": round(item.similarity, 8),
             }
         )
@@ -106,25 +113,21 @@ def _persist_decision(
     after_state: dict[str, object],
     resolver_model: str | None,
 ) -> None:
-    session.add(
-        MemoryResolutionDecision(
-            namespace_id=staged.namespace_id,
-            candidate_id=staged.id,
-            resolver_kind="ai",
-            resolver_model=resolver_model,
-            resolver_schema_version=config.resolver_schema_version,
-            prompt_version=config.prompt_version,
-            candidate_snapshot_hash=snapshot,
-            action=action.value,
-            target_memory_ids=[str(target.id) for target in targets],
-            confidence=confidence,
-            reason=reason,
-            evidence_quotes=evidence_quotes,
-            validation_status=validation_status,
-            before_state=before_state,
-            after_state=after_state,
-        )
-    )
+    staged.latest_decision = {
+        "resolver_kind": "ai",
+        "resolver_model": resolver_model,
+        "resolver_schema_version": config.resolver_schema_version,
+        "prompt_version": config.prompt_version,
+        "candidate_snapshot_hash": snapshot,
+        "action": action.value,
+        "target_memory_ids": [str(target.id) for target in targets],
+        "confidence": confidence,
+        "reason": reason,
+        "evidence_quotes": evidence_quotes,
+        "validation_status": validation_status,
+        "before_state": before_state,
+        "after_state": after_state,
+    }
 
 
 def _create_memory(session: Session, staged: MemoryCandidate, candidate: ExtractedMemory) -> Memory:
@@ -163,7 +166,6 @@ def _create_memory(session: Session, staged: MemoryCandidate, candidate: Extract
         importance=candidate.importance,
         confidence=candidate.confidence,
         source_session_id=source.session_id,
-        source_message_ids=candidate.evidence_message_ids,
         embedding=staged.embedding,
         metadata_={
             "origin": "cross_message_resolver",
@@ -258,7 +260,7 @@ def resolve_staged_candidates(
             candidate = ExtractedMemory.model_validate(staged.extraction_payload)
             scoped = _candidate_context(session, staged, candidate, config)
             snapshot = snapshot_hash(scoped)
-            targets, _ = _target_snapshot(scoped)
+            targets, _ = _target_snapshot(session, scoped)
             staged.status = "resolving"
         try:
             decision = provider.generate_structured(
@@ -303,7 +305,7 @@ def resolve_staged_candidates(
                 )
                 counts["deferred"] += 1
                 continue
-            _, target_by_ref = _target_snapshot(current)
+            _, target_by_ref = _target_snapshot(session, current)
             rejection = validate_ai_decision(
                 decision,
                 candidate_ref="candidate-1",
@@ -376,11 +378,8 @@ def resolve_staged_candidates(
                     )
                     counts["deferred"] += 1
                     continue
-                memory.source_message_ids = list(
-                    dict.fromkeys([*(memory.source_message_ids or []), *candidate.evidence_message_ids])
-                )
                 memory.confidence = max(memory.confidence, candidate.confidence)
-                ensure_claim(
+                ensure_memory_evidence(
                     session, memory,
                     evidence_by_message={
                         candidate.evidence_message_ids[0]: (
@@ -425,7 +424,7 @@ def resolve_staged_candidates(
                     )
                     counts["deferred"] += 1
                     continue
-            incoming_claim = ensure_claim(
+            ensure_memory_evidence(
                 session, incoming,
                 evidence_by_message={
                     candidate.evidence_message_ids[0]: (
@@ -436,42 +435,19 @@ def resolve_staged_candidates(
                 },
                 extractor_model=resolver_model, schema_version="memory-extraction-v2",
             )
-            initial_state = derive_initial_state(
-                candidate.modality, candidate.temporal_scope, candidate.memory_type
-            )
-            if decision.action is ResolutionAction.CREATE and initial_state.lifecycle_action == "archive":
-                session.add(
-                    LifecycleDecision(
-                        namespace_id=staged.namespace_id,
-                        claim_id=incoming_claim.id,
-                        action="archive",
-                        policy_version=STATE_POLICY_VERSION,
-                        reason=initial_state.reason,
-                        before_state={"status": "active"},
-                        after_state={
-                            "status": incoming.status,
-                            "modality": incoming.modality,
-                            "temporal_scope": incoming.temporal_scope,
-                        },
-                        rollback_payload={"status": "active"},
-                    )
-                )
             for target in selected:
-                sync_claim_view(session, target)
-                target_claim = ensure_claim(
-                    session, target,
-                    evidence_by_message={}, extractor_model=resolver_model,
-                    schema_version="memory-extraction-v2",
-                )
                 if decision.action in {ResolutionAction.SUPERSEDE, ResolutionAction.CONTRADICT}:
-                    append_relation_evidence(
-                        session, namespace_id=staged.namespace_id, source_claim=incoming_claim,
-                        target_claim=target_claim,
-                        relation_type=("supersedes" if decision.action is ResolutionAction.SUPERSEDE else "contradicts"),
-                        origin="ai_resolver", evidence_refs=decision.evidence_quotes,
+                    upsert_memory_relation(
+                        session,
+                        staged.namespace_id,
+                        incoming.id,
+                        target.id,
+                        "supersedes" if decision.action is ResolutionAction.SUPERSEDE else "contradicts",
+                        1.0,
+                        origin="ai_resolver",
+                        evidence_refs=decision.evidence_quotes,
                         confidence=decision.confidence,
                     )
-            sync_claim_view(session, incoming)
             staged.status = "resolved"
             staged.attempt_count += 1
             _persist_decision(

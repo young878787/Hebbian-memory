@@ -46,6 +46,6 @@ def test_schema_preflight_reports_missing_canonical_tables(monkeypatch) -> None:
 
     with pytest.raises(
         db.SchemaCompatibilityError,
-            match="20260720_0004.*20260721_0007.*message_extraction_outcomes",
+            match="20260720_0004.*20260722_0008.*memory_associations",
     ):
         db.verify_canonical_architecture_schema(Engine())

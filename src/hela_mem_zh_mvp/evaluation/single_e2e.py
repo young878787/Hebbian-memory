@@ -18,14 +18,13 @@ from ..ingestion.workflow import ingest
 from ..persistence.models import (
     Memory,
     MemoryCandidate,
-    MemoryEdge,
     MemoryNamespace,
-    MemoryResolutionDecision,
+    MemoryRelation,
 )
 from ..persistence.namespaces import get_namespace, purge_namespace
 from ..providers.base import StructuredProvider
 from ..providers.embedding import EmbeddingClient
-from ..retrieval.answerer import answer_query
+from ..retrieval.answerer import AnswerError, answer_query
 from ..retrieval.contracts import QueryScope, RetrievalMode, RunMode
 from ..retrieval.service import Retriever
 from .contracts import FixtureQuery
@@ -79,8 +78,8 @@ def _namespace_counts(session: Session, namespace_key: str) -> dict[str, int]:
         or 0,
         "edges": session.scalar(
             select(func.count())
-            .select_from(MemoryEdge)
-            .where(MemoryEdge.namespace_id == namespace.id)
+            .select_from(MemoryRelation)
+            .where(MemoryRelation.namespace_id == namespace.id)
         )
         or 0,
     }
@@ -88,16 +87,17 @@ def _namespace_counts(session: Session, namespace_key: str) -> dict[str, int]:
 
 def _resolver_state(session: Session, namespace_key: str) -> dict[str, Any]:
     namespace = get_namespace(session, namespace_key, create=False)
-    decisions = session.scalars(
-        select(MemoryResolutionDecision).where(
-            MemoryResolutionDecision.namespace_id == namespace.id
-        )
-    ).all()
     candidates = session.scalars(
         select(MemoryCandidate).where(MemoryCandidate.namespace_id == namespace.id)
     ).all()
     return {
-        "decision_actions": dict(Counter(decision.action for decision in decisions)),
+        "decision_actions": dict(
+            Counter(
+                candidate.latest_decision.get("action")
+                for candidate in candidates
+                if candidate.latest_decision.get("action")
+            )
+        ),
         "candidate_statuses": dict(Counter(candidate.status for candidate in candidates)),
     }
 
@@ -222,12 +222,18 @@ def run_single_e2e_evaluation(
                 RunMode.EVALUATION,
             )
             answer_error: str | None = None
+            answer_error_kind: str | None = None
             try:
                 if query_index:
                     time.sleep(config.evaluation.answer_request_interval_seconds)
                 answer = answer_query(provider, fixture_query.query, result).model_dump()
+            except AnswerError as exc:
+                answer_error = f"{type(exc).__name__}: {exc}"
+                answer_error_kind = "answer_contract"
+                answer = exc.answer.model_dump() if exc.answer is not None else None
             except Exception as exc:
                 answer_error = f"{type(exc).__name__}: {exc}"
+                answer_error_kind = "provider"
                 answer = None
             retrieval = result.as_dict()
             selected = {item["external_id"] for item in retrieval["items"] if item["selected"]}
@@ -254,6 +260,7 @@ def run_single_e2e_evaluation(
                 "retrieved_memories": retrieval,
                 "answer": answer,
                 "answer_error": answer_error,
+                "answer_error_kind": answer_error_kind,
                 "deterministic_checks": checks,
             }
             records.append(record)
@@ -263,13 +270,18 @@ def run_single_e2e_evaluation(
                     "query": fixture_query.query,
                     "answer": answer,
                     "error": answer_error,
+                    "error_kind": answer_error_kind,
                     "reference_answer": query_reference_answer(fixture_query, source_messages),
                     "reference_conversations": query_reference_conversations(
                         fixture_query, source_messages
                     ),
                 }
             )
-        judge_input = [_judge_record(record) for record in records if record["answer"] is not None]
+        # Judge every completed query, including answers that failed the
+        # citation gate.  The deterministic contract remains authoritative,
+        # while the judge can still assess the answer text and explain the
+        # grounding failure instead of silently dropping the case.
+        judge_input = [_judge_record(record) for record in records]
         try:
             ai_judge = judge_answers(provider, judge_input)
         except Exception as exc:
@@ -303,7 +315,10 @@ def run_single_e2e_evaluation(
                     "completed": len(records),
                     "answers_returned": sum(record["answer"] is not None for record in records),
                     "provider_errors": sum(
-                        record["answer_error"] is not None for record in records
+                        record["answer_error_kind"] == "provider" for record in records
+                    ),
+                    "answer_contract_errors": sum(
+                        record["answer_error_kind"] == "answer_contract" for record in records
                     ),
                 },
                 "coverage": {

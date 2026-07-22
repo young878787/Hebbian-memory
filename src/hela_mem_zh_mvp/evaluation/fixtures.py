@@ -10,8 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..ingestion.contracts import SourceMessage
-from ..persistence.edges import edge_weight, upsert_edge
 from ..persistence.models import Memory, MemoryNamespace
+from ..persistence.relations import upsert_memory_relation
 from ..providers.embedding import EmbeddingClient
 from .contracts import FixtureEdge, FixtureMemory, FixtureQuery
 
@@ -174,19 +174,25 @@ def seed_fixtures(
         record.importance = item.importance
         record.confidence = item.confidence
         record.source_session_id = item.source_session_id
-        record.source_message_ids = item.source_message_ids
-        record.metadata_ = {**item.metadata, "fixture_owned": True}
+        record.metadata_ = {
+            **item.metadata,
+            "fixture_owned": True,
+            "legacy_source_message_ids": item.source_message_ids,
+        }
         records[item.external_id] = record
     session.flush()
     if seed_edges:
         for edge in bundle.edges:
-            upsert_edge(
+            upsert_memory_relation(
                 session,
                 namespace.id,
                 records[edge.source_external_id].id,
                 records[edge.target_external_id].id,
                 edge.edge_type,
-                edge_weight(edge.edge_type, edge.weight),
-                edge.metadata,
+                edge.weight
+                if edge.weight is not None
+                else (1.0 if edge.edge_type.value in {"supersedes", "contradicts", "supports"} else 0.25),
+                origin=str(edge.metadata.get("origin", "fixture")),
+                metadata=edge.metadata,
             )
     return len(records)

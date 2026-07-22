@@ -9,8 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import AppConfig
-from ..persistence.models import AssociationStat, Memory, MemoryEdge
-from ..persistence.retrieval_runs import create_retrieval_items, create_retrieval_run
+from ..persistence.models import Memory, MemoryAssociation, MemoryRelation
 from ..providers.embedding import EmbeddingClient
 from .activation import ActivationEdge, activate
 from .contracts import QueryScope, RankedMemory, RetrievalMode, RetrievalResult, RunMode
@@ -57,33 +56,44 @@ class Retriever:
     ) -> None:
         if not seeds:
             return
-        edge_rows = self.session.scalars(
-            select(MemoryEdge).where(
-                MemoryEdge.namespace_id == namespace_id,
-                MemoryEdge.edge_type != "co_retrieval",
+        relation_rows = self.session.scalars(
+            select(MemoryRelation).where(
+                MemoryRelation.namespace_id == namespace_id,
+                MemoryRelation.status == "active",
             )
         ).all()
         association_rows = self.session.scalars(
-            select(AssociationStat).where(
-                AssociationStat.namespace_id == namespace_id,
-                AssociationStat.effective_weight > 0,
+            select(MemoryAssociation).where(
+                MemoryAssociation.namespace_id == namespace_id,
+                MemoryAssociation.effective_weight > 0,
             )
         ).all()
-        activation_edges = [
-            ActivationEdge(
-                source_id=edge.source_id,
-                target_id=edge.target_id,
-                edge_type=edge.edge_type,
-                weight=edge.weight,
-                provenance=str(edge.metadata_.get("origin", "memory_edge")),
+        activation_edges = []
+        for relation in relation_rows:
+            activation_edges.append(
+                ActivationEdge(
+                    source_id=relation.source_id,
+                    target_id=relation.target_id,
+                    edge_type=relation.relation_type,
+                    weight=relation.weight,
+                    provenance=relation.origin,
+                )
             )
-            for edge in edge_rows
-        ]
+            if relation.relation_type in {"semantic", "contradicts"}:
+                activation_edges.append(
+                    ActivationEdge(
+                        source_id=relation.target_id,
+                        target_id=relation.source_id,
+                        edge_type=relation.relation_type,
+                        weight=relation.weight,
+                        provenance=relation.origin,
+                    )
+                )
         for stat in association_rows:
             activation_edges.extend(
                 (
-                    ActivationEdge(stat.source_memory_id, stat.target_memory_id, "association", stat.effective_weight, "association_stats"),
-                    ActivationEdge(stat.target_memory_id, stat.source_memory_id, "association", stat.effective_weight, "association_stats"),
+                    ActivationEdge(stat.source_memory_id, stat.target_memory_id, "association", stat.effective_weight, "memory_associations"),
+                    ActivationEdge(stat.target_memory_id, stat.source_memory_id, "association", stat.effective_weight, "memory_associations"),
                 )
             )
         target_ids = {edge.target_id for edge in activation_edges}
@@ -212,19 +222,7 @@ class Retriever:
             item.candidate_rank = rank
         self._mark_selected(items, seeds, mode, self.config.retrieval.final_top_k, scope)
         latency_ms = (time.perf_counter() - started) * 1000
-        run = create_retrieval_run(
-            self.session,
-            namespace_id,
-            query,
-            mode,
-            scope,
-            run_mode,
-            latency_ms,
-            self.config.snapshot(),
-        )
-        create_retrieval_items(self.session, namespace_id, run.id, items)
-        self.session.commit()
-        return RetrievalResult(run.id, mode, scope, latency_ms, ordered_candidates)
+        return RetrievalResult(uuid.uuid4(), mode, scope, latency_ms, ordered_candidates)
 
 
 __all__ = ["Retriever"]

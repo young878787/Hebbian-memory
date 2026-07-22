@@ -13,11 +13,11 @@ from sqlalchemy.orm import Session
 
 from ..config import AppConfig
 from ..ingestion.input import load_input_messages
-from ..persistence.models import MemoryEdge
+from ..persistence.models import MemoryRelation
 from ..persistence.namespaces import FIXTURE_NAMESPACE, get_namespace, reset_test_namespace
 from ..providers.base import StructuredProvider
 from ..providers.embedding import EmbeddingClient
-from ..retrieval.answerer import answer_query
+from ..retrieval.answerer import AnswerError, answer_query
 from ..retrieval.contracts import AnswerResult, RetrievalMode, RunMode
 from ..retrieval.service import Retriever
 from .fixtures import (
@@ -56,12 +56,14 @@ def _write_summary(payload: dict[str, Any]) -> None:
 def _edge_checksum(
     session: Session, namespace_id: object
 ) -> list[tuple[str, str, str, float, int, str]]:
-    rows = session.scalars(select(MemoryEdge).where(MemoryEdge.namespace_id == namespace_id)).all()
+    rows = session.scalars(
+        select(MemoryRelation).where(MemoryRelation.namespace_id == namespace_id)
+    ).all()
     return sorted(
         (
             str(row.source_id),
             str(row.target_id),
-            row.edge_type,
+            row.relation_type,
             row.weight,
             row.activation_count,
             json.dumps(row.metadata_, sort_keys=True),
@@ -122,12 +124,23 @@ def evaluate(
                 ),
             )
             answer_error: str | None = None
+            answer_error_kind: str | None = None
             try:
                 if query_index:
                     time.sleep(config.evaluation.answer_request_interval_seconds)
                 answer = answer_query(provider, fixture_query.query, result)
+            except AnswerError as exc:
+                answer_error = f"{type(exc).__name__}: {exc}"
+                answer_error_kind = "answer_contract"
+                answer = exc.answer or AnswerResult(
+                    schema_version="memory-answer-v1",
+                    answerable=False,
+                    answer="回答提供者未產生符合引用契約的結果。",
+                    citations=[],
+                )
             except Exception as exc:
                 answer_error = f"{type(exc).__name__}: {exc}"
+                answer_error_kind = "provider"
                 answer = AnswerResult(
                     schema_version="memory-answer-v1",
                     answerable=False,
@@ -165,11 +178,17 @@ def evaluate(
                     "retrieved_memories": result.as_dict(),
                     "answer": answer.model_dump(),
                     "answer_error": answer_error,
+                    "answer_error_kind": answer_error_kind,
                     "deterministic_checks": deterministic,
                 }
             )
             answers.append(
-                {"query_id": fixture_query.query_id, **answer.model_dump(), "error": answer_error}
+                {
+                    "query_id": fixture_query.query_id,
+                    **answer.model_dump(),
+                    "error": answer_error,
+                    "error_kind": answer_error_kind,
+                }
             )
         after = _edge_checksum(session, namespace.id)
         _write_artifact("ingestion.json", ingestion)
@@ -277,7 +296,12 @@ def evaluate(
                     record["deterministic_checks"]["answerable_matches_expectation"]
                     for record in records
                 ),
-                "provider_errors": sum(record["answer_error"] is not None for record in records),
+                "provider_errors": sum(
+                    record["answer_error_kind"] == "provider" for record in records
+                ),
+                "answer_contract_errors": sum(
+                    record["answer_error_kind"] == "answer_contract" for record in records
+                ),
             },
             "qa": build_qa_section(records, ai_judge),
             "artifacts": {

@@ -21,7 +21,6 @@ def test_parser_preserves_supported_command_surface() -> None:
     assert parser.parse_args(["smoke"]).command == "smoke"
     assert parser.parse_args(["ingest"]).command == "ingest"
     assert parser.parse_args(["evaluate"]).command == "evaluate"
-    assert parser.parse_args(["architecture-backfill", "--namespace", "test-space"]).command == "architecture-backfill"
     assert parser.parse_args(["lifecycle-report", "--namespace", "test-space"]).command == "lifecycle-report"
     assert parser.parse_args(["rebuild-graph", "--namespace", "test-space"]).command == "rebuild-graph"
 

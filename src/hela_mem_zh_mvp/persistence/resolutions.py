@@ -10,8 +10,8 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..ingestion.contracts import EdgeType, EffectiveOrder, ResolutionAction, ResolutionDecision
-from .edges import upsert_edge
 from .models import Memory
+from .relations import upsert_memory_relation
 
 
 class ResolutionApplyError(ValueError):
@@ -34,13 +34,13 @@ def _would_cycle(
             text(
                 """
                 WITH RECURSIVE path(id) AS (
-                  SELECT target_id FROM memory_edges
+                  SELECT target_id FROM memory_relations
                   WHERE namespace_id = :namespace_id AND source_id = :target_id
-                    AND edge_type = 'supersedes'
+                    AND relation_type = 'supersedes'
                   UNION
-                  SELECT edge.target_id FROM memory_edges edge
+                  SELECT edge.target_id FROM memory_relations edge
                   JOIN path ON edge.source_id = path.id
-                  WHERE edge.namespace_id = :namespace_id AND edge.edge_type = 'supersedes'
+                  WHERE edge.namespace_id = :namespace_id AND edge.relation_type = 'supersedes'
                 ) SELECT EXISTS (SELECT 1 FROM path WHERE id = :source_id)
                 """
             ),
@@ -76,14 +76,16 @@ def apply_resolution(
             for target in targets:
                 if _would_cycle(session, namespace_id, incoming.id, target.id):
                     raise ResolutionApplyError("supersedes cycle")
-                upsert_edge(
+                upsert_memory_relation(
                     session,
                     namespace_id,
                     incoming.id,
                     target.id,
                     EdgeType.SUPERSEDES,
                     1.0,
-                    {"origin": "resolution", "reason": decision.reason},
+                    origin="resolution",
+                    evidence_refs=decision.evidence_quotes,
+                    metadata={"reason": decision.reason},
                 )
                 target.status = "superseded"
             incoming.status = "active"
@@ -91,28 +93,32 @@ def apply_resolution(
             for target in targets:
                 if _would_cycle(session, namespace_id, target.id, incoming.id):
                     raise ResolutionApplyError("supersedes cycle")
-                upsert_edge(
+                upsert_memory_relation(
                     session,
                     namespace_id,
                     target.id,
                     incoming.id,
                     EdgeType.SUPERSEDES,
                     1.0,
-                    {"origin": "resolution", "reason": "late arriving evidence"},
+                    origin="resolution",
+                    evidence_refs=decision.evidence_quotes,
+                    metadata={"reason": "late arriving evidence"},
                 )
             incoming.status = "superseded"
         else:
             raise ResolutionApplyError("same-time memories cannot supersede")
     else:
         for target in targets:
-            upsert_edge(
+            upsert_memory_relation(
                 session,
                 namespace_id,
                 incoming.id,
                 target.id,
                 EdgeType.CONTRADICTS,
                 1.0,
-                {"origin": "resolution", "reason": decision.reason},
+                origin="resolution",
+                evidence_refs=decision.evidence_quotes,
+                metadata={"reason": decision.reason},
             )
         # A known, separate active state remains current; otherwise neither
         # side is presented as current truth.

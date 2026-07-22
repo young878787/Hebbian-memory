@@ -9,24 +9,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import ResolutionConfig
-from ..persistence.claims import ensure_claim, sync_claim_view
-from ..persistence.edges import upsert_edge
+from ..persistence.evidence import ensure_memory_evidence
 from ..persistence.models import (
     Entity,
     EntityAlias,
     IngestionRun,
-    LifecycleDecision,
     Memory,
     MemoryCandidate,
     MemoryEntity,
-    MemoryResolutionDecision,
-)
-from ..persistence.models import (
-    MessageExtractionOutcome as StoredMessageExtractionOutcome,
 )
 from ..persistence.models import SourceMessage as StoredSourceMessage
 from ..persistence.namespaces import get_namespace
-from ..persistence.relations import append_relation_evidence
+from ..persistence.relations import upsert_memory_relation
 from ..persistence.resolutions import ResolutionApplyError, apply_resolution
 from ..providers.embedding import EmbeddingClient
 from .candidates import find_scoped_candidates
@@ -54,10 +48,6 @@ from .state import STATE_POLICY_VERSION, derive_initial_state
 
 class StoreError(ValueError):
     pass
-
-
-def _merge_unique(values: list[str] | None, additions: list[str]) -> list[str]:
-    return list(dict.fromkeys([*(values or []), *additions]))
 
 
 def start_ingestion_run(
@@ -118,20 +108,17 @@ def record_extraction_outcomes(
             "invalid extraction coverage: "
             f"duplicates={duplicates}, unexpected={unexpected}, unreported={unreported}"
         )
-    for outcome in outcomes:
-        session.add(
-            StoredMessageExtractionOutcome(
-                namespace_id=run.namespace_id,
-                ingestion_run_id=run.id,
-                source_message_id=outcome.source_message_id,
-                schema_version=outcome.schema_version,
-                status=outcome.status.value,
-                reason_code=(outcome.reason_code.value if outcome.reason_code else None),
-                provider_attempts=outcome.provider_attempts,
-                error=outcome.error,
-                payload=outcome.model_dump(mode="json"),
-            )
-        )
+    run.extraction_outcomes = [
+        {
+            "source_message_id": outcome.source_message_id,
+            "schema_version": outcome.schema_version,
+            "status": outcome.status.value,
+            "reason_code": outcome.reason_code.value if outcome.reason_code else None,
+            "provider_attempts": outcome.provider_attempts,
+            "error": outcome.error,
+        }
+        for outcome in outcomes
+    ]
     run.error_count = int(result["failed_count"])
     run.metadata_ = {**(run.metadata_ or {}), "extraction_coverage": result}
     return result
@@ -202,13 +189,11 @@ def _entity(
             namespace_id=namespace_id,
             canonical_name=canonical_name,
             entity_type=entity_type,
-            aliases=list(dict.fromkeys(aliases)),
             confidence=confidence,
         )
         session.add(entity)
         session.flush()
     else:
-        entity.aliases = _merge_unique(entity.aliases, aliases)
         entity.confidence = max(entity.confidence, confidence)
     for normalized, raw in aliases_by_key.items():
         alias = session.scalar(
@@ -270,7 +255,6 @@ def write_ingestion(
         for item in extraction.entities
     }
     memory_by_candidate: dict[str, Memory] = {}
-    claim_by_candidate = {}
     staged_by_candidate: dict[str, MemoryCandidate] = {}
     explicit_state_relation_ids = {
         candidate_id
@@ -353,30 +337,23 @@ def write_ingestion(
         if resolution_result.action is ResolutionAction.DEFER:
             staged.status = "deferred"
             counts["deferred"] += 1
-            session.add(
-                MemoryResolutionDecision(
-                    namespace_id=namespace.id,
-                    candidate_id=staged.id,
-                    resolver_kind="deterministic",
-                    resolver_schema_version=resolution.resolver_schema_version,
-                    prompt_version=resolution.prompt_version,
-                    candidate_snapshot_hash=snapshot_hash(scoped),
-                    action=ResolutionAction.DEFER.value,
-                    target_memory_ids=[str(item.memory.id) for item in scoped],
-                    confidence=0.0,
-                    reason=resolution_result.reason,
-                    evidence_quotes=[],
-                    validation_status="deferred",
-                    before_state=before_state,
-                    after_state=before_state,
-                )
-            )
+            staged.latest_decision = {
+                "resolver_kind": "deterministic",
+                "resolver_schema_version": resolution.resolver_schema_version,
+                "prompt_version": resolution.prompt_version,
+                "candidate_snapshot_hash": snapshot_hash(scoped),
+                "action": ResolutionAction.DEFER.value,
+                "target_memory_ids": [str(item.memory.id) for item in scoped],
+                "confidence": 0.0,
+                "reason": resolution_result.reason,
+                "evidence_quotes": [],
+                "validation_status": "deferred",
+                "before_state": before_state,
+                "after_state": before_state,
+            }
             continue
         if resolution_result.existing:
             memory = resolution_result.existing
-            memory.source_message_ids = _merge_unique(
-                memory.source_message_ids, candidate.evidence_message_ids
-            )
             memory.confidence = max(memory.confidence, candidate.confidence)
             counts["merged"] += 1
         else:
@@ -412,7 +389,6 @@ def write_ingestion(
                     for message in messages
                     if message.message_id == candidate.evidence_message_ids[0]
                 ),
-                source_message_ids=candidate.evidence_message_ids,
                 embedding=embedding,
                 metadata_={
                     "origin": "extractor",
@@ -428,28 +404,22 @@ def write_ingestion(
             created_memories.append(memory)
             counts["created"] += 1
         staged.status = "resolved"
-        session.add(
-            MemoryResolutionDecision(
-                namespace_id=namespace.id,
-                candidate_id=staged.id,
-                resolver_kind="deterministic",
-                resolver_schema_version=resolution.resolver_schema_version,
-                prompt_version=resolution.prompt_version,
-                candidate_snapshot_hash=snapshot_hash(scoped),
-                action=resolution_result.action.value,
-                target_memory_ids=[str(memory.id)] if resolution_result.existing else [],
-                confidence=1.0,
-                reason=resolution_result.reason,
-                evidence_quotes=[candidate.evidence],
-                validation_status="passed",
-                before_state=before_state,
-                after_state={str(memory.id): memory.status},
-            )
-        )
+        staged.latest_decision = {
+            "resolver_kind": "deterministic",
+            "resolver_schema_version": resolution.resolver_schema_version,
+            "prompt_version": resolution.prompt_version,
+            "candidate_snapshot_hash": snapshot_hash(scoped),
+            "action": resolution_result.action.value,
+            "target_memory_ids": [str(memory.id)] if resolution_result.existing else [],
+            "confidence": 1.0,
+            "reason": resolution_result.reason,
+            "evidence_quotes": [candidate.evidence],
+            "validation_status": "passed",
+            "before_state": before_state,
+            "after_state": {str(memory.id): memory.status},
+        }
         memory_by_candidate[candidate.candidate_id] = memory
-        # The legacy Memory remains the retrieval view during migration, but
-        # every resolved extraction also receives immutable claim evidence.
-        claim_by_candidate[candidate.candidate_id] = ensure_claim(
+        ensure_memory_evidence(
             session,
             memory,
             evidence_by_message={
@@ -463,23 +433,6 @@ def write_ingestion(
             extractor_model=extractor_model,
             schema_version=extraction.schema_version,
         )
-        if resolution_result.existing is None and initial_state.lifecycle_action == "archive":
-            session.add(
-                LifecycleDecision(
-                    namespace_id=namespace.id,
-                    claim_id=claim_by_candidate[candidate.candidate_id].id,
-                    action="archive",
-                    policy_version=STATE_POLICY_VERSION,
-                    reason=initial_state.reason,
-                    before_state={"status": "active"},
-                    after_state={
-                        "status": memory.status,
-                        "modality": memory.modality,
-                        "temporal_scope": memory.temporal_scope,
-                    },
-                    rollback_payload={"status": "active"},
-                )
-            )
         for entity_id in candidate.entity_candidate_ids:
             entity = entity_by_candidate[entity_id]
             if session.get(MemoryEntity, (memory.id, entity.id)) is None:
@@ -512,8 +465,6 @@ def write_ingestion(
             memory_by_candidate[relation.source_candidate_id],
             memory_by_candidate[relation.target_candidate_id],
         )
-        source_claim = claim_by_candidate[relation.source_candidate_id]
-        target_claim = claim_by_candidate[relation.target_candidate_id]
         if relation.edge_type in {EdgeType.SUPERSEDES, EdgeType.CONTRADICTS}:
             order = reliable_order(
                 source.occurred_at,
@@ -546,59 +497,45 @@ def write_ingestion(
                     f"invalid extractor {relation.edge_type.value} relation "
                     f"{relation.source_candidate_id}->{relation.target_candidate_id}: {exc}"
                 ) from exc
-            session.add(
-                MemoryResolutionDecision(
-                    namespace_id=namespace.id,
-                    candidate_id=staged_by_candidate[relation.source_candidate_id].id,
-                    resolver_kind="extractor",
-                    resolver_schema_version=resolution.resolver_schema_version,
-                    prompt_version=resolution.prompt_version,
-                    candidate_snapshot_hash=snapshot_hash([]),
-                    action=decision.action.value,
-                    target_memory_ids=[str(target.id)],
-                    confidence=decision.confidence,
-                    reason=decision.reason,
-                    evidence_quotes=decision.evidence_quotes,
-                    validation_status="passed",
-                    before_state=before,
-                    after_state=after,
-                )
-            )
+            staged_by_candidate[relation.source_candidate_id].latest_decision = {
+                "resolver_kind": "extractor",
+                "resolver_schema_version": resolution.resolver_schema_version,
+                "prompt_version": resolution.prompt_version,
+                "candidate_snapshot_hash": snapshot_hash([]),
+                "action": decision.action.value,
+                "target_memory_ids": [str(target.id)],
+                "confidence": decision.confidence,
+                "reason": decision.reason,
+                "evidence_quotes": decision.evidence_quotes,
+                "validation_status": "passed",
+                "before_state": before,
+                "after_state": after,
+            }
             if relation.edge_type is EdgeType.SUPERSEDES:
                 counts["superseded"] += 1
             else:
                 counts["contradicted"] += 1
-            append_relation_evidence(
+            upsert_memory_relation(
                 session,
-                namespace_id=namespace.id,
-                source_claim=source_claim,
-                target_claim=target_claim,
-                relation_type=relation.edge_type.value,
+                namespace.id,
+                source.id,
+                target.id,
+                relation.edge_type,
+                1.0,
                 origin="extractor",
                 evidence_refs=[relation.evidence],
             )
-            sync_claim_view(session, target)
-            session.flush()
-            sync_claim_view(session, source)
             continue
-        if relation.edge_type.value in {"supports", "temporal"}:
-            append_relation_evidence(
-                session,
-                namespace_id=namespace.id,
-                source_claim=source_claim,
-                target_claim=target_claim,
-                relation_type=relation.edge_type.value,
-                origin="extractor",
-                evidence_refs=[relation.evidence],
-            )
-        upsert_edge(
+        upsert_memory_relation(
             session,
             namespace.id,
             source.id,
             target.id,
             relation.edge_type,
             1.0,
-            {"origin": "extractor", "evidence": relation.evidence},
+            origin="extractor",
+            evidence_refs=[relation.evidence],
+            metadata={"evidence": relation.evidence},
         )
     for memory in created_memories:
         entity_ids = session.scalars(
@@ -620,14 +557,14 @@ def write_ingestion(
                 neighbor.memory.id != memory.id
                 and neighbor.similarity >= resolution.ambiguous_similarity_min
             ):
-                upsert_edge(
+                upsert_memory_relation(
                     session,
                     namespace.id,
                     memory.id,
                     neighbor.memory.id,
                     EdgeType.SEMANTIC,
                     neighbor.similarity,
-                    {"origin": "scoped_pgvector"},
+                    origin="scoped_pgvector",
                 )
         prior = session.scalar(
             select(Memory)
@@ -640,14 +577,14 @@ def write_ingestion(
             .order_by(Memory.occurred_at.desc())
         )
         if prior is not None:
-            upsert_edge(
+            upsert_memory_relation(
                 session,
                 namespace.id,
                 memory.id,
                 prior.id,
                 EdgeType.TEMPORAL,
                 0.25,
-                {"origin": "resolver"},
+                origin="resolver",
             )
     if complete_run:
         finish_ingestion_run(session, run, counts)

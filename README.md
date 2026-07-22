@@ -21,7 +21,7 @@ uv run pytest
 
 ## 完整執行入口
 
-根目錄 `main.py` 是通用入口。無參數時會執行完整流程：AI extraction、resolver、60 題 retrieval、AI answer、AI judge。fixture 目前包含 60 筆記憶（其中 20 筆為 `lifestyle`）與 60 題測試；題目包含 32 題 baseline 與 28 題 `architecture_v1`，並記錄複雜度、目標架構能力與必要 hop 數。每次執行使用獨立暫用 namespace，結束時會刪除其所有資料與 namespace row；舊的 `single-e2e-v1` namespace 也會一併移除，不影響其他 namespace。
+根目錄 `main.py` 是通用入口。無參數時會執行完整流程：AI extraction、resolver、40 題 retrieval、AI answer、AI judge。fixture 目前包含 60 筆記憶（其中 20 筆為 `lifestyle`）與 40 題測試：20 題使用者特質／偏好／工作習慣的 factual 題、5 題無證據 abstention 題，以及 15 題跨技術／工作／生活脈絡的 `architecture_v1` advanced 題；後者並記錄目標架構能力與必要 hop 數。每次執行使用獨立暫用 namespace，結束時會刪除其所有資料與 namespace row；舊的 `single-e2e-v1` namespace 也會一併移除，不影響其他 namespace。
 
 ```powershell
 uv run python main.py
