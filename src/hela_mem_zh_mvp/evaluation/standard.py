@@ -188,7 +188,6 @@ def evaluate(
             # a deterministic contract failure green (or block a green gate).
             "status": contract_status,
             "contract_status": contract_status,
-            "semantic_gate_status": contract_status,
             "judge_status": ai_judge["status"],
             "ingestion": ingestion,
             "coverage": {

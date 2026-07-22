@@ -17,7 +17,6 @@ from .db import (
     verify_database_target,
 )
 from .evaluation.fixtures import load_fixture_bundle
-from .evaluation.live_resolver import run_live_resolver_evaluation
 from .evaluation.single_e2e import (
     DEFAULT_INPUT_PATH,
     DEFAULT_QUERY_ID,
@@ -91,7 +90,6 @@ def build_parser() -> argparse.ArgumentParser:
     ask_command.add_argument("query")
     ask_command.add_argument("--learn", action="store_true")
     commands.add_parser("evaluate")
-    commands.add_parser("live-resolver-evaluate")
     for name in ("run", "single-e2e-evaluate"):
         run = commands.add_parser(name)
         run.add_argument("--input", type=Path, default=DEFAULT_INPUT_PATH)
@@ -159,17 +157,6 @@ def main(argv: list[str] | None = None) -> int:
                     extractor_model=settings.google_model,
                 )
             _print_json({"summary": "results/summary.json", "status": summary["status"]})
-        elif args.command == "live-resolver-evaluate":
-            with _database_session() as session:
-                summary = run_live_resolver_evaluation(
-                    session,
-                    GoogleProvider(settings),
-                    EmbeddingClient(settings),
-                    extractor_model=settings.google_model,
-                )
-            _print_json(
-                {"summary": "results/live_resolver/summary.json", "status": summary["status"]}
-            )
         elif args.command in {"run", "single-e2e-evaluate"}:
             with _database_session() as session:
                 summary = run_single_e2e_evaluation(

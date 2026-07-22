@@ -434,48 +434,15 @@ Memory.source_message_ids 包含全部 ClaimEvidence.source_message_id
 - `status=archived`：current query 不得表述為目前計畫；historical query 可說明曾考慮。
 - selected memory 只有 uncertain/archived context 時，answerable 可為 true，但回答必須是 state-aware，而不是錯誤 no-answer 或確定事實。
 
-## 10. Deterministic evaluation 修正
+## 10. Deterministic evaluation 修正（歷史提案，已撤回）
 
 ### 10.1 新增 source-to-memory extraction oracle
 
-新增 `data/fixtures/live_extraction_expectations.jsonl`，以 `source_message_id` 為 key，不依賴 runtime memory UUID 或 provider candidate ID。
-
-每個 expected atomic claim 至少描述：
-
-```text
-source_message_id
-expected_outcome
-expected_atomic_count
-required_content_terms
-required_entity_names
-memory_type
-modality
-temporal_scope
-expected_status
-forbidden_assertions[]
-```
-
-第一批 hard gate 固定涵蓋 `msg-003/004/045/046/050`，之後擴到全部 60 則 durable/NO_MEMORY 邊界。
+本節原先規劃以固定 JSONL source oracle 驗證 extraction；該方案已撤回。測試資料不得成為正式 `ingest()` 的硬依賴，現行流程只保留通用的 outcome coverage 與 schema 驗證。
 
 ### 10.2 Extraction hard gates
 
-```text
-message outcome coverage == 60/60
-failed outcomes == 0
-expected atomic claims missing == 0
-unexpected active claims == 0
-evidence span violations == 0
-state mapping mismatches == 0
-claim/view dual-write mismatches == 0
-```
-
-對關鍵訊息的明確 gate：
-
-- `msg-003` memory count 至少 2，含 CMP research active 與 risk uncertain。
-- `msg-004` memory count 至少 2，CMP entity/topic 不得遺失。
-- `msg-045` 必須 active。
-- `msg-046` 必須 historical + archived，且有 lifecycle audit。
-- `msg-050` 必須 uncertain。
+固定 source oracle 與 live resolver cases 已移除；需要驗證語義時，應在測試中直接建立小型輸入與 expected outcome，不讀取 `data/fixtures` 的 runtime 檔案。
 
 ### 10.3 E2E query hard gates
 
@@ -495,12 +462,11 @@ AI judge 仍保留，但最終狀態分開：
 
 ```text
 contract_status       # deterministic schema/runtime
-semantic_gate_status  # fixture/source oracle
 judge_status          # AI quality review
 overall_status = all required deterministic statuses PASS
 ```
 
-AI judge `PASS` 不得覆蓋 semantic gate `FAIL`。
+AI judge `PASS` 不得覆蓋 deterministic contract `FAIL`。
 
 ### 10.4 Artifact lineage 與 latest-only publish
 
@@ -525,8 +491,7 @@ producer
 
 變更：
 
-- 新增 `live_extraction_expectations.jsonl`。
-- 新增五個關鍵訊息的 contract tests。
+- 以測試內建的小型輸入建立關鍵訊息的 contract tests。
 - 測試先以目前 runtime 跑出預期 failure，證明測試真的抓得到問題。
 
 Gate：測試能精確指出 `msg-003/004/045/046/050` 的 missing claim/status，不只報總數不同。
@@ -659,4 +624,3 @@ Gate：
 - 若 retrieval scope policy regression，可回退 ranking policy；已寫入的 source/modality/history 不需刪除。
 - 若 source-derived archive 規則誤判，只能透過有 audit 的 lifecycle reversal 修正，不直接改 row 或刪除 evidence。
 - 不對現有未提交檔案做 reset；實作時應在目前 dirty worktree 上以獨立小 patch 分階段落地。
-

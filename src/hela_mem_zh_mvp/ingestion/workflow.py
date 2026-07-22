@@ -11,8 +11,6 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..config import load_config
-from ..evaluation.fixtures import load_key_extraction_expectations
-from ..evaluation.semantic_gate import evaluate_extraction_semantics
 from ..providers.base import StructuredProvider
 from ..providers.embedding import EmbeddingClient
 from .contracts import ExtractionOutcomeStatus, MessageExtractionOutcome
@@ -27,7 +25,6 @@ from .service import (
 )
 
 RESULTS_DIRECTORY = Path("results/pipeline")
-SEMANTIC_CANARY_PATH = Path("data/fixtures/live_extraction_expectations.jsonl")
 
 
 def _write_artifact(name: str, payload: object) -> None:
@@ -73,18 +70,8 @@ def ingest(
             )
     with session.begin():
         coverage = record_extraction_outcomes(session, run, outcomes)
-    canary_expectations = load_key_extraction_expectations(SEMANTIC_CANARY_PATH)
-    applicable_expectations = [
-        item for item in canary_expectations if item.source_message_id in {message.message_id for message in messages}
-    ]
-    semantic_gate = (
-        evaluate_extraction_semantics(outcomes, messages, applicable_expectations)
-        if applicable_expectations
-        else {"status": "SKIPPED", "checked_message_count": 0, "failures": []}
-    )
     _write_artifact("extraction.json", [outcome.model_dump(mode="json") for outcome in outcomes])
     _write_artifact("extraction_coverage.json", coverage)
-    _write_artifact("extraction_semantic_gate.json", semantic_gate)
     counts = {
         "created": 0,
         "merged": 0,
@@ -93,20 +80,6 @@ def ingest(
         "ignored": 0,
         "deferred": 0,
     }
-    if semantic_gate["status"] == "FAIL":
-        # Source-to-memory failures are fail-closed: outcome audit remains
-        # durable, but no invalid candidate reaches staging or canonical rows.
-        with session.begin():
-            finish_ingestion_run(session, run, counts, status="failed_semantic")
-        _write_artifact("resolution.json", [])
-        return {
-            "status": "FAILED_SEMANTIC",
-            "coverage_pass": False,
-            "messages": len(messages),
-            **counts,
-            "coverage": coverage,
-            "semantic_gate": semantic_gate,
-        }
     resolution_config = config.resolution
     for message, outcome in zip(messages, outcomes, strict=True):
         if outcome.status is not ExtractionOutcomeStatus.EXTRACTED:
@@ -146,15 +119,12 @@ def ingest(
     status = (
         "PARTIAL"
         if coverage["failed_count"]
-        else "FAILED_SEMANTIC"
-        if semantic_gate["status"] == "FAIL"
         else "COMPLETED"
     )
     return {
         "status": status,
-        "coverage_pass": not coverage["failed_count"] and semantic_gate["status"] != "FAIL",
+        "coverage_pass": not coverage["failed_count"],
         "messages": len(messages),
         **counts,
         "coverage": coverage,
-        "semantic_gate": semantic_gate,
     }

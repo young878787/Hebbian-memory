@@ -13,7 +13,7 @@ from ..ingestion.contracts import SourceMessage
 from ..persistence.edges import edge_weight, upsert_edge
 from ..persistence.models import Memory, MemoryNamespace
 from ..providers.embedding import EmbeddingClient
-from .contracts import FixtureEdge, FixtureMemory, FixtureQuery, LiveExtractionExpectation
+from .contracts import FixtureEdge, FixtureMemory, FixtureQuery
 
 
 class FixtureError(ValueError):
@@ -81,8 +81,7 @@ def _load_jsonl(
     path: Path,
     model: type[FixtureMemory]
     | type[FixtureEdge]
-    | type[FixtureQuery]
-    | type[LiveExtractionExpectation],
+    | type[FixtureQuery],
 ) -> list:
     values: list = []
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -93,11 +92,6 @@ def _load_jsonl(
         except Exception as exc:
             raise FixtureError(f"{path.name}:{number}: {exc}") from exc
     return values
-
-
-def load_key_extraction_expectations(path: str | Path) -> list[LiveExtractionExpectation]:
-    """Load a deliberately partial canary oracle without weakening full coverage loaders."""
-    return _load_jsonl(Path(path), LiveExtractionExpectation)
 
 
 def load_fixture_bundle(directory: str | Path, *, include_edges: bool = False) -> FixtureBundle:
