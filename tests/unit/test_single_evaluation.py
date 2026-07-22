@@ -11,7 +11,7 @@ from hela_mem_zh_mvp.retrieval.answerer import AnswerError
 def test_single_e2e_cli_accepts_batch_and_one_case_overrides() -> None:
     batch = build_parser().parse_args(["run"])
     assert batch.query is None
-    assert batch.query_limit == 60
+    assert batch.query_limit == 40
 
     one_case = build_parser().parse_args(
         [

@@ -44,7 +44,7 @@ LEGACY_NAMESPACE = "single-e2e-v1"
 DEFAULT_INPUT_PATH = Path("data/input/conversations.jsonl")
 DEFAULT_QUERY = "使用者最後對 RTX 3090 的決定是什麼？"
 DEFAULT_QUERY_ID = "single-e2e-001"
-DEFAULT_QUERY_LIMIT = 60
+DEFAULT_QUERY_LIMIT = 40
 
 
 def _write_artifact(name: str, payload: Any) -> None:
